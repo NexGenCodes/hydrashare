@@ -4,9 +4,13 @@
 *.swp
 *.swo
 
-# OS
+# OS & Temp
 .DS_Store
 Thumbs.db
+*~
+*.bak
+*.tmp
+*.log
 
 # Environment
 .env

@@ -11,3 +11,21 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Build Artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.bin
+bin/
+obj/
+dist/
+build/
+
+# Rust
+target/
+
+# Agent
+.agent/
+.gemini/

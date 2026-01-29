@@ -3,6 +3,7 @@ package transfer
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,7 +14,7 @@ import (
 )
 
 /*
-#cgo LDFLAGS: -L../../hydra_muscle/target/release -lhydra_muscle
+#cgo LDFLAGS: -L${SRCDIR}/../../ -L${SRCDIR}/../../../ -lhydra_muscle
 #include <stdint.h>
 #include <stdlib.h>
 #include "../../hydra_muscle/hydra_muscle.h"
@@ -22,6 +23,12 @@ import (
 extern void goProgressCallback(int64_t transferred, int64_t total, void* user_data);
 */
 import "C"
+
+var (
+	transferSessions = make(map[string]*TransferSession)
+	sessionsMu       sync.RWMutex
+	receiveDir       string
+)
 
 // TransferSession manages an active file transfer
 type TransferSession struct {
@@ -38,10 +45,12 @@ type TransferSession struct {
 	mu               sync.Mutex
 }
 
-var (
-	transferSessions = make(map[string]*TransferSession)
-	sessionsMu       sync.RWMutex
-)
+func init() {
+	// Initialize receive directory in Downloads
+	home, _ := os.UserHomeDir()
+	receiveDir = filepath.Join(home, "Downloads", "HydraShare")
+	os.MkdirAll(receiveDir, 0755)
+}
 
 // Progress callback that Go exports to C
 //
@@ -163,7 +172,7 @@ func performTransfer(session *TransferSession) error {
 	result := C.transfer_data(
 		C.intptr_t(sourceFd),
 		C.intptr_t(destFd),
-		C.longlong(session.FileSize),
+		C.int64_t(session.FileSize),
 		session.Cancelled,
 		C.progress_callback_t(C.goProgressCallback),
 		unsafe.Pointer(h),
@@ -252,5 +261,84 @@ func CancelTransfer(transferID string) {
 
 	if ok {
 		*session.Cancelled = 1
+	}
+}
+
+// StartReceiver starts the file receiving listener on port 5051
+func StartReceiver(eventsChan chan<- map[string]interface{}) {
+	ln, err := net.Listen("tcp", ":5051")
+	if err != nil {
+		fmt.Printf("❌ Failed to start receiver: %v\n", err)
+		return
+	}
+	defer ln.Close()
+
+	fmt.Println("📥 File receiver listening on :5051")
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			fmt.Printf("❌ Failed to accept receiver connection: %v\n", err)
+			continue
+		}
+
+		go handleIncomingTransfer(conn, eventsChan)
+	}
+}
+
+func handleIncomingTransfer(conn net.Conn, eventsChan chan<- map[string]interface{}) {
+	defer conn.Close()
+
+	// 1. Receive file metadata (first 4KB or until newline)
+	// For simplicity in this protocol, we'll wait for a JSON header
+	reader := json.NewDecoder(conn)
+	var header struct {
+		FileName string `json:"file_name"`
+		FileSize int64  `json:"file_size"`
+	}
+
+	if err := reader.Decode(&header); err != nil {
+		fmt.Printf("❌ Failed to decode transfer header: %v\n", err)
+		return
+	}
+
+	destPath := filepath.Join(receiveDir, header.FileName)
+	fmt.Printf("📥 Receiving file: %s (%d bytes) -> %s\n", header.FileName, header.FileSize, destPath)
+
+	file, err := os.Create(destPath)
+	if err != nil {
+		fmt.Printf("❌ Failed to create file: %v\n", err)
+		return
+	}
+	defer file.Close()
+
+	// Notify start
+	eventsChan <- map[string]interface{}{
+		"type":      "RECEIVE_STARTED",
+		"file_name": header.FileName,
+		"file_size": header.FileSize,
+	}
+
+	// 2. Stream data from connection to file
+	// We use io.CopyN if we want to be precise based on header
+	start := time.Now()
+	transferred, err := io.CopyN(file, conn, header.FileSize)
+	if err != nil && err != io.EOF {
+		fmt.Printf("❌ Transfer interrupted: %v\n", err)
+		eventsChan <- map[string]interface{}{
+			"type":  "RECEIVE_ERROR",
+			"error": err.Error(),
+		}
+		return
+	}
+
+	duration := time.Since(start)
+	fmt.Printf("✅ Received %d bytes in %v\n", transferred, duration)
+
+	// Notify complete
+	eventsChan <- map[string]interface{}{
+		"type":      "RECEIVE_COMPLETE",
+		"file_name": header.FileName,
+		"path":      destPath,
 	}
 }

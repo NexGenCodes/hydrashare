@@ -136,10 +136,10 @@ unsafe fn transfer_data_impl(
 
         let bytes_to_send = std::cmp::min(CHUNK_SIZE, (file_size - total_sent) as usize);
         
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         let sent = sendfile(dest_fd as i32, source_fd as i32, &mut offset, bytes_to_send);
         
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
         let sent = {
             let mut len = bytes_to_send as off_t;
             let result = libc::sendfile(

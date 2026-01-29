@@ -1,0 +1,26 @@
+[package]
+name = "hydra_muscle"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]  # Build as C-compatible dynamic library
+
+[dependencies]
+# Windows-specific dependencies for TransmitFile
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+] }
+
+# Linux/Android dependencies for sendfile
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

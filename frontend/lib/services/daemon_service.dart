@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'device_info_service.dart';
 
 /// Service class for managing persistent TCP connection to Go daemon
 class DaemonService {
@@ -24,6 +25,12 @@ class DaemonService {
       StreamController<List<Map<String, dynamic>>>.broadcast();
   final List<Map<String, dynamic>> _connectedPeers = [];
 
+  final _chatController = StreamController<Map<String, dynamic>>.broadcast();
+  final _fileOfferController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  String _currentRole = 'none'; // 'host', 'guest', or 'none'
+
   /// Stream of responses from the daemon
   Stream<Map<String, dynamic>> get responses => _responseController.stream;
 
@@ -35,11 +42,32 @@ class DaemonService {
   List<Map<String, dynamic>> get currentPeers =>
       List.unmodifiable(_connectedPeers);
 
+  /// Stream of incoming chat messages
+  Stream<Map<String, dynamic>> get messages => _chatController.stream;
+
+  /// Stream of incoming file offers
+  Stream<Map<String, dynamic>> get fileOffers => _fileOfferController.stream;
+
   /// Check if currently connected to daemon
   bool get isConnected => _isConnected;
 
+  /// Get current role
+  String get currentRole => _currentRole;
+
+  /// Set current role and clear peers
+  void setRole(String role) {
+    _currentRole = role;
+    _connectedPeers.clear();
+    _connectedPeersController.add([]);
+  }
+
   /// Connect to the Go daemon and start listening for responses
   Future<void> connect({int retries = 5}) async {
+    if (_isConnected && _socket != null) {
+      debugPrint('ℹ️ Already connected to Go daemon');
+      return;
+    }
+
     for (int i = 0; i < retries; i++) {
       try {
         debugPrint(
@@ -55,9 +83,26 @@ class DaemonService {
 
         debugPrint('✅ Connected to Go daemon');
         _startListening();
+
+        // Automatically register device name with daemon
+        final deviceName = await DeviceInfoService.getDeviceName();
+        await setDeviceName(deviceName);
+
+        // Start native foreground service for background survival
+        if (Platform.isAndroid) {
+          try {
+            await _p2pChannel.invokeMethod('startForegroundService');
+            debugPrint('🛡️ Android Foreground Service Started');
+          } catch (e) {
+            debugPrint('⚠️ Failed to start foreground service: $e');
+          }
+        }
+
         return; // Success!
       } catch (e) {
-        debugPrint('⏳ Connection attempt ${i + 1} failed. Retrying in 1s...');
+        debugPrint(
+          '⏳ Connection attempt ${i + 1} failed: $e. Retrying in 1s...',
+        );
         await Future.delayed(const Duration(seconds: 1));
       }
     }
@@ -86,6 +131,16 @@ class DaemonService {
               _removeConnectedPeer(response);
             } else if (response['type'] == 'WIFI_DIRECT_REQ') {
               _handleWiFiDirectRequest();
+            } else if (response['type'] == 'INCOMING_CHAT') {
+              _chatController.add(response);
+              if (response['unread'] == true) {
+                _incrementUnread(response['ip']);
+              }
+            } else if (response['type'] == 'FILE_OFFER') {
+              _fileOfferController.add(response);
+            } else if (response['type'] == 'TRANSFER_REJECTED') {
+              // Optionally handle rejection specifically or just let response stream handle it
+              debugPrint('❌ File transfer rejected by peer');
             }
           } catch (e) {
             debugPrint('❌ Error parsing response: $e');
@@ -168,6 +223,46 @@ class DaemonService {
     }
   }
 
+  /// Generate a secure AES encryption key AND get host IP for QR handshake
+  Future<Map<String, String>> generateCodeWithIP() async {
+    final completer = Completer<Map<String, String>>();
+
+    // Listen for the response
+    final subscription = responses.listen((response) {
+      if (response['type'] == 'CODE_GENERATED') {
+        completer.complete({
+          'key': response['key'] as String,
+          'ip': response['ip'] as String? ?? '127.0.0.1',
+        });
+      } else if (response['type'] == 'ERROR') {
+        completer.completeError(response['error'] ?? 'Unknown error');
+      }
+    });
+
+    // Send the command
+    await sendCommand({'type': 'GENERATE_CODE'});
+
+    // Wait for response with timeout
+    try {
+      final result = await completer.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          throw TimeoutException('Key generation timed out');
+        },
+      );
+      await subscription.cancel();
+      return result;
+    } catch (e) {
+      await subscription.cancel();
+      rethrow;
+    }
+  }
+
+  /// Set local device name in daemon
+  Future<void> setDeviceName(String name) async {
+    await sendCommand({'type': 'SET_DEVICE_NAME', 'name': name});
+  }
+
   /// Connect to a peer using the scanned code/IP
   Future<void> connectToPeer(String code) async {
     final completer = Completer<void>();
@@ -182,9 +277,12 @@ class DaemonService {
     });
 
     // Send the command
-    // Assuming code is "ip:port" or just IP
-    // If it's a token, we might need a different command, but for now assuming direct IP for dev
-    await sendCommand({'type': 'CONNECT_PEER', 'dest_ip': code});
+    final localName = await DeviceInfoService.getDeviceName();
+    await sendCommand({
+      'type': 'CONNECT_PEER',
+      'dest_ip': code,
+      'name': localName, // Tell them who we are
+    });
 
     // Wait for response with timeout
     try {
@@ -201,6 +299,16 @@ class DaemonService {
     }
   }
 
+  /// Send a private chat message to a peer
+  Future<void> sendChat(String peerIp, String text) async {
+    await sendCommand({'type': 'SEND_CHAT', 'dest_ip': peerIp, 'text': text});
+  }
+
+  /// Broadcast a chat message to all connected peers (Host only)
+  Future<void> broadcastChat(String text) async {
+    await sendCommand({'type': 'BROADCAST_CHAT', 'text': text});
+  }
+
   /// Close the connection to the daemon
   Future<void> disconnect() async {
     debugPrint('🔌 Disconnecting from daemon...');
@@ -212,14 +320,46 @@ class DaemonService {
     debugPrint('✅ Disconnected');
   }
 
-  void _addConnectedPeer(Map<String, dynamic> peer) {
-    // Avoid duplicates based on IP
-    final ip = peer['ip'] ?? peer['dest_ip'];
-    if (ip != null &&
-        !_connectedPeers.any((p) => (p['ip'] ?? p['dest_ip']) == ip)) {
-      _connectedPeers.add(peer);
+  /// Mark messages from a peer as read
+  Future<void> markAsRead(String peerIp) async {
+    await sendCommand({'type': 'MARK_AS_READ', 'dest_ip': peerIp});
+    final index = _connectedPeers.indexWhere(
+      (p) => (p['ip'] ?? p['dest_ip']) == peerIp,
+    );
+    if (index != -1) {
+      _connectedPeers[index]['unread_count'] = 0;
       _connectedPeersController.add(currentPeers);
     }
+  }
+
+  void _incrementUnread(String? ip) {
+    if (ip == null) return;
+    final index = _connectedPeers.indexWhere(
+      (p) => (p['ip'] ?? p['dest_ip']) == ip,
+    );
+    if (index != -1) {
+      final current = _connectedPeers[index]['unread_count'] ?? 0;
+      _connectedPeers[index]['unread_count'] = current + 1;
+      _connectedPeersController.add(currentPeers);
+    }
+  }
+
+  void _addConnectedPeer(Map<String, dynamic> peer) {
+    final ip = peer['ip'] ?? peer['dest_ip'];
+    if (ip == null) return;
+
+    final index = _connectedPeers.indexWhere(
+      (p) => (p['ip'] ?? p['dest_ip']) == ip,
+    );
+
+    if (index != -1) {
+      // Update existing
+      _connectedPeers[index] = {..._connectedPeers[index], ...peer};
+    } else {
+      // Add new
+      _connectedPeers.add(peer);
+    }
+    _connectedPeersController.add(currentPeers);
   }
 
   void _removeConnectedPeer(Map<String, dynamic> peer) {
@@ -234,6 +374,8 @@ class DaemonService {
   void dispose() {
     _responseController.close();
     _connectedPeersController.close();
+    _chatController.close();
+    _fileOfferController.close();
     _socket?.destroy();
   }
 
@@ -244,5 +386,32 @@ class DaemonService {
     } on PlatformException catch (e) {
       debugPrint('❌ Failed to open P2P invitation: ${e.message}');
     }
+  }
+
+  /// Send a file offer to a peer
+  Future<void> sendFile(String filePath, String destIp) async {
+    await sendCommand({
+      'type': 'SEND_FILE',
+      'file_path': filePath,
+      'dest_ip': destIp,
+    });
+  }
+
+  /// Accept a file offer
+  Future<void> acceptFile(String offerId, String destIp) async {
+    await sendCommand({
+      'type': 'ACCEPT_FILE',
+      'offer_id': offerId,
+      'dest_ip': destIp,
+    });
+  }
+
+  /// Reject a file offer
+  Future<void> rejectFile(String offerId, String destIp) async {
+    await sendCommand({
+      'type': 'REJECT_FILE',
+      'offer_id': offerId,
+      'dest_ip': destIp,
+    });
   }
 }

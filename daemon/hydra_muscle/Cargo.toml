@@ -4,9 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib"]  # Build as C-compatible dynamic library
+crate-type = ["cdylib", "staticlib"]  # Build as C-compatible dynamic & static library
 
 [dependencies]
+sha2 = "0.10"
+aes-gcm = "0.10.3"
+rand = "0.8"
+
 # Windows-specific dependencies for TransmitFile
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = [

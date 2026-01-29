@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'services/go_daemon_ffi.dart';
 import 'screens/onboarding_screen.dart';
+import 'services/notification_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
   // Initialize Go Daemon if running on Android
   if (Platform.isAndroid) {
     GoDaemonFfi.init();
@@ -11,6 +14,10 @@ void main() {
   } else if (Platform.isWindows) {
     _startWindowsDaemon();
   }
+
+  // Initialize notification service
+  await NotificationService().init();
+
   runApp(const MyApp());
 }
 

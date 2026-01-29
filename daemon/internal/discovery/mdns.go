@@ -3,8 +3,8 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"hydra_share/daemon/internal/connectivity"
 	"log"
-	"net"
 	"os"
 	"time"
 
@@ -53,7 +53,7 @@ func NewService() (*Service, error) {
 // StartAdvertising starts advertising this device via mDNS
 func (s *Service) StartAdvertising() error {
 	// Get local IP addresses
-	ips, err := getLocalIPs()
+	ips, err := connectivity.GetLocalIPs()
 	if err != nil {
 		return fmt.Errorf("failed to get local IPs: %w", err)
 	}
@@ -162,39 +162,11 @@ func (s *Service) StopDiscovery() {
 	log.Println("🔍 Peer discovery stopped")
 }
 
-// getLocalIPs returns all non-loopback IPv4 addresses
-func getLocalIPs() ([]net.IP, error) {
-	var ips []net.IP
-
-	// On Android, net.InterfaceAddrs() often fails due to SELinux restrictions (netlink_route_socket)
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		log.Printf("⚠️  net.InterfaceAddrs() failed: %v", err)
-	} else {
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-				if ipnet.IP.To4() != nil {
-					ips = append(ips, ipnet.IP)
-				}
-			}
-		}
+// UpdateName updates the advertised hostname and restarts advertising if active
+func (s *Service) UpdateName(newName string) {
+	s.hostname = newName
+	if s.server != nil {
+		s.StopAdvertising()
+		s.StartAdvertising()
 	}
-
-	// Fallback: Use UDP Dial to find default outbound IP (doesn't require netlink)
-	if len(ips) == 0 {
-		conn, err := net.Dial("udp", "8.8.8.8:80")
-		if err == nil {
-			localAddr := conn.LocalAddr().(*net.UDPAddr)
-			ips = append(ips, localAddr.IP)
-			conn.Close()
-			log.Printf("🌐 Found local IP via UDP dial: %v", localAddr.IP)
-		}
-	}
-
-	// Last fallback to localhost
-	if len(ips) == 0 {
-		ips = append(ips, net.ParseIP("127.0.0.1"))
-	}
-
-	return ips, nil
 }

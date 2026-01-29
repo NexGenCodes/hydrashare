@@ -21,23 +21,29 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
   @override
   void initState() {
     super.initState();
-    // Auto-generate code when entering the screen
-    _generateCode();
+    _connectDaemon().then((_) => _generateCode());
 
     // Listen for peer connection
     _connectionSubscription = widget.daemonService.responses.listen((response) {
       if (response['type'] == 'PEER_CONNECTED') {
+        debugPrint('🤝 Peer connected event received in Handshake Screen');
         if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) =>
-                  HomeScreen(daemonService: widget.daemonService),
-            ),
-          );
+          _goToHomeScreen();
         }
       }
     });
+  }
+
+  void _goToHomeScreen() {
+    if (!mounted) return;
+
+    debugPrint('🚀 Navigating to HomeScreen');
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => HomeScreen(daemonService: widget.daemonService),
+      ),
+    );
   }
 
   @override
@@ -46,15 +52,23 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
     super.dispose();
   }
 
+  Future<void> _connectDaemon() async {
+    try {
+      await widget.daemonService.connect();
+    } catch (e) {
+      debugPrint('Error connecting to daemon: $e');
+    }
+  }
+
   Future<void> _generateCode() async {
     setState(() {
       _isGenerating = true;
     });
 
     try {
-      final key = await widget.daemonService.generateCode();
+      final result = await widget.daemonService.generateCodeWithIP();
       setState(() {
-        _generatedKey = key;
+        _generatedKey = '${result['ip']}|${result['key']}';
         _isGenerating = false;
       });
     } catch (e) {
@@ -209,6 +223,36 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 32),
+        // manual escape button
+        StreamBuilder<List<Map<String, dynamic>>>(
+          stream: widget.daemonService.connectedPeers,
+          initialData: widget.daemonService.currentPeers,
+          builder: (context, snapshot) {
+            final hasPeers = (snapshot.data ?? []).isNotEmpty;
+            if (!hasPeers) return const SizedBox.shrink();
+
+            return Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: ElevatedButton.icon(
+                onPressed: _goToHomeScreen,
+                icon: const Icon(Icons.home_rounded),
+                label: const Text('Go to Home Screen'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ],
     );

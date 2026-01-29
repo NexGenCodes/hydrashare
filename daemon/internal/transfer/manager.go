@@ -1,6 +1,13 @@
 package transfer
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,8 +25,10 @@ import (
 #include <stdint.h>
 #include <stdlib.h>
 #include "../../hydra_muscle/hydra_muscle.h"
-
-// Forward declaration for the progress callback
+#ifndef HYDRA_TYPES
+#define HYDRA_TYPES
+typedef int64_t hydra_i64;
+#endif
 extern void goProgressCallback(int64_t transferred, int64_t total, void* user_data);
 */
 import "C"
@@ -28,21 +37,31 @@ var (
 	transferSessions = make(map[string]*TransferSession)
 	sessionsMu       sync.RWMutex
 	receiveDir       string
+
+	// Global encryption key for the session
+	transferKey   string
+	transferKeyMu sync.RWMutex
+
+	// Track received files for post-transfer verification
+	receivedFiles   = make(map[string]string) // Name -> Path
+	receivedFilesMu sync.Mutex
 )
 
 // TransferSession manages an active file transfer
 type TransferSession struct {
-	ID               string
-	FilePath         string
-	DestIP           string
-	FileSize         int64
-	BytesTransferred int64
-	LastUpdate       time.Time
-	Client           net.Conn
-	Cancelled        *C.int32_t // Flag in C-allocated memory
-	LastBytes        int64
-	LastUpdateTime   time.Time
-	mu               sync.Mutex
+	ID                string
+	FilePath          string
+	DestIP            string
+	FileSize          int64
+	BytesTransferred  int64
+	LastUpdate        time.Time
+	Client            net.Conn
+	Cancelled         *C.int32_t // Flag in C-allocated memory
+	LastBytes         int64
+	LastUpdateTime    time.Time
+	StartOffset       int64
+	LastRotationBytes int64
+	mu                sync.Mutex
 }
 
 func init() {
@@ -51,6 +70,44 @@ func init() {
 	receiveDir = filepath.Join(home, "Downloads", "HydraShare")
 	os.MkdirAll(receiveDir, 0755)
 }
+
+// getAvailablePath returns a unique path by appending (1), (2), etc. if needed
+func getAvailablePath(basePath string) string {
+	if _, err := os.Stat(basePath); os.IsNotExist(err) {
+		return basePath
+	}
+
+	ext := filepath.Ext(basePath)
+	name := basePath[:len(basePath)-len(ext)]
+	counter := 1
+
+	for {
+		newPath := fmt.Sprintf("%s (%d)%s", name, counter, ext)
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			return newPath
+		}
+		counter++
+	}
+}
+
+// SetTransferKey sets the global encryption key for transfers
+func SetTransferKey(key string) {
+	transferKeyMu.Lock()
+	defer transferKeyMu.Unlock()
+	transferKey = key
+	fmt.Printf("🔐 Transfer Key Set: %s... (len=%d)\n", key[:5], len(key))
+}
+
+// GetTransferKey retrieves the current transfer key safely
+func GetTransferKey() string {
+	transferKeyMu.RLock()
+	defer transferKeyMu.RUnlock()
+	return transferKey
+}
+
+const (
+	rotationThreshold = 500 * 1024 * 1024 // Rotate key every 500MB
+)
 
 // Progress callback that Go exports to C
 //
@@ -64,20 +121,24 @@ func goProgressCallback(transferred C.int64_t, total C.int64_t, userData unsafe.
 	session.BytesTransferred = int64(transferred)
 	session.LastUpdate = time.Now()
 	session.mu.Unlock()
+}
 
-	fmt.Printf("📊 [%s] Progress: %d / %d bytes (%.1f%%)\n",
-		session.ID,
-		int64(transferred),
-		int64(total),
-		float64(transferred)/float64(total)*100.0)
+// GetFileInfo returns the file info for a given path
+func GetFileInfo(filePath string) (os.FileInfo, error) {
+	return os.Stat(filePath)
 }
 
 // StartTransfer initiates a file transfer to a destination IP
-func StartTransfer(filePath, destIP string, conn net.Conn) error {
+func StartTransfer(filePath, destIP string, uiConn net.Conn, ctrlConn net.Conn, startOffset int64) error {
 	// Validate file exists
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return fmt.Errorf("file not found: %w", err)
+	}
+
+	key := GetTransferKey()
+	if key == "" {
+		return fmt.Errorf("encryption key not set")
 	}
 
 	fileSize := fileInfo.Size()
@@ -93,10 +154,11 @@ func StartTransfer(filePath, destIP string, conn net.Conn) error {
 		DestIP:         destIP,
 		FileSize:       fileSize,
 		LastUpdate:     time.Now(),
-		Client:         conn,
+		Client:         uiConn,
 		Cancelled:      cancelPtr,
 		LastBytes:      0,
 		LastUpdateTime: time.Now(),
+		StartOffset:    startOffset,
 	}
 
 	sessionsMu.Lock()
@@ -111,7 +173,7 @@ func StartTransfer(filePath, destIP string, conn net.Conn) error {
 			sessionsMu.Unlock()
 		}()
 
-		if err := performTransfer(session); err != nil {
+		if err := performTransfer(session, key, ctrlConn, startOffset); err != nil {
 			sendTransferError(session, err)
 		} else {
 			sendTransferComplete(session)
@@ -128,11 +190,11 @@ func StartTransfer(filePath, destIP string, conn net.Conn) error {
 		"file_size":   fileSize,
 		"file_name":   filepath.Base(filePath),
 	}
-	encoder := json.NewEncoder(conn)
+	encoder := json.NewEncoder(uiConn)
 	return encoder.Encode(response)
 }
 
-func performTransfer(session *TransferSession) error {
+func performTransfer(session *TransferSession, key string, ctrlConn net.Conn, startOffset int64) error {
 	// Open source file
 	sourceFile, err := os.Open(session.FilePath)
 	if err != nil {
@@ -148,10 +210,13 @@ func performTransfer(session *TransferSession) error {
 	defer destConn.Close()
 
 	// Get file descriptors
-	sourceFd := int(sourceFile.Fd())
+	srcFd := int(sourceFile.Fd())
 
 	// For network socket, we need the underlying fd
-	destTCP := destConn.(*net.TCPConn)
+	destTCP, ok := destConn.(*net.TCPConn)
+	if !ok {
+		return fmt.Errorf("failed to cast connection to TCPConn")
+	}
 	destFile, err := destTCP.File()
 	if err != nil {
 		return fmt.Errorf("failed to get destination fd: %w", err)
@@ -164,17 +229,117 @@ func performTransfer(session *TransferSession) error {
 	go progressUpdater(session, stopProgress)
 	defer close(stopProgress)
 
+	// Monitor session for key rotation
+	go func() {
+		for {
+			select {
+			case <-stopProgress:
+				return
+			case <-time.After(1 * time.Second):
+				session.mu.Lock()
+				// Delta-based rotation check
+				if session.BytesTransferred-session.LastRotationBytes >= rotationThreshold {
+					session.LastRotationBytes = session.BytesTransferred
+					fmt.Printf("🔄 Key Rotation Threshold reached for %s at %d bytes\n", session.ID, session.BytesTransferred)
+
+					// Send rotation signal direct to Peer's control plane
+					if ctrlConn != nil {
+						rotationMsg := map[string]interface{}{
+							"type":        "ROTATE_KEY_SIGNAL",
+							"transfer_id": session.ID,
+							"at_bytes":    session.BytesTransferred,
+						}
+						json.NewEncoder(ctrlConn).Encode(rotationMsg)
+					}
+				}
+				session.mu.Unlock()
+			}
+		}
+	}()
+
+	// Calculate Hash in Background to avoid blocking the transfer start
+	var fileHash string
+	hashDone := make(chan string, 1)
+	go func() {
+		h := sha256.New()
+		f, err := os.Open(session.FilePath)
+		if err == nil {
+			io.Copy(h, f)
+			f.Close()
+			hashDone <- hex.EncodeToString(h.Sum(nil))
+		} else {
+			hashDone <- ""
+		}
+	}()
+
+	// --- 1. Send Encrypted Header ---
+
+	header := struct {
+		FileName string `json:"file_name"`
+		FileSize int64  `json:"file_size"`
+		FileHash string `json:"file_hash,omitempty"` // Optional in first header
+	}{
+		FileName: filepath.Base(session.FilePath),
+		FileSize: session.FileSize,
+	}
+	hBytes, err := json.Marshal(header)
+	if err != nil {
+		return fmt.Errorf("failed to marshal header: %w", err)
+	}
+
+	// Encrypt Header
+	keyBytes, err := base64.StdEncoding.DecodeString(key)
+	if err != nil {
+		return fmt.Errorf("invalid key: %w", err)
+	}
+	block, err := aes.NewCipher(keyBytes)
+	if err != nil {
+		return fmt.Errorf("failed to create cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	hNonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, hNonce); err != nil {
+		return fmt.Errorf("failed to generate header nonce: %w", err)
+	}
+
+	hCipher := gcm.Seal(nil, hNonce, hBytes, nil)
+
+	// Write Header: [Nonce (12)] + [Len (4)] + [Ciphertext]
+	if _, err := destConn.Write(hNonce); err != nil {
+		return fmt.Errorf("failed to write header nonce: %w", err)
+	}
+
+	if err := binary.Write(destConn, binary.BigEndian, uint32(len(hCipher))); err != nil {
+		return fmt.Errorf("failed to write header length: %w", err)
+	}
+
+	if _, err := destConn.Write(hCipher); err != nil {
+		return fmt.Errorf("failed to write header cipher: %w", err)
+	}
+
+	// --- 2. Call Rust for Encrypted File Body (Rust sends FNonce + Chunks) ---
 	// Create a handle for the session to pass safely to C
 	h := cgo.NewHandle(session)
 	defer h.Delete()
 
+	// Convert key to C pointer
+	cKey := C.CBytes(keyBytes)
+	defer C.free(cKey)
+
 	// Call Rust transfer function
 	result := C.transfer_data(
-		C.intptr_t(sourceFd),
+		C.intptr_t(srcFd),
 		C.intptr_t(destFd),
-		C.int64_t(session.FileSize),
+		C.hydra_i64(session.FileSize),
+		C.hydra_i64(startOffset),
+		(*C.uint8_t)(cKey),
+		C.uintptr_t(len(keyBytes)),
 		session.Cancelled,
-		C.progress_callback_t(C.goProgressCallback),
+		(C.progress_callback_t)(C.goProgressCallback),
 		unsafe.Pointer(h),
 	)
 
@@ -182,53 +347,54 @@ func performTransfer(session *TransferSession) error {
 		return fmt.Errorf("transfer failed with code: %d", result)
 	}
 
+	// --- 3. Send Verification Hash (Post-Transfer) ---
+	fileHash = <-hashDone
+	if fileHash != "" && ctrlConn != nil {
+		fmt.Printf("🛡️  Sending verification hash for %s\n", session.ID)
+		verifyMsg := map[string]interface{}{
+			"type":        "VERIFY_HASH",
+			"transfer_id": session.ID,
+			"file_name":   filepath.Base(session.FilePath),
+			"hash":        fileHash,
+		}
+		json.NewEncoder(ctrlConn).Encode(verifyMsg)
+	}
+
+	// Also notify local UI that we are done on our side
+	if session.Client != nil {
+		completeMsg := map[string]interface{}{
+			"type":        "TRANSFER_COMPLETE",
+			"transfer_id": session.ID,
+			"file_name":   filepath.Base(session.FilePath),
+		}
+		json.NewEncoder(session.Client).Encode(completeMsg)
+	}
+
 	return nil
 }
 
-func progressUpdater(session *TransferSession, stop chan bool) {
-	ticker := time.NewTicker(200 * time.Millisecond)
+func progressUpdater(session *TransferSession, stopChan chan bool) {
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-
-	encoder := json.NewEncoder(session.Client)
-
 	for {
 		select {
+		case <-stopChan:
+			return
 		case <-ticker.C:
 			session.mu.Lock()
-			transferred := session.BytesTransferred
+			current := session.BytesTransferred
 			total := session.FileSize
-			lastBytes := session.LastBytes
-			lastTime := session.LastUpdateTime
-			now := time.Now()
-
-			// Calculate interval speed
-			bytesDiff := transferred - lastBytes
-			timeDiff := now.Sub(lastTime).Seconds()
-
-			session.LastBytes = transferred
-			session.LastUpdateTime = now
 			session.mu.Unlock()
 
-			percentage := float64(transferred) / float64(total) * 100.0
-
-			var speed float64
-			if timeDiff > 0 {
-				speed = float64(bytesDiff) / timeDiff / 1024 / 1024 // MB/s
-			}
-
 			response := map[string]interface{}{
-				"type":              "TRANSFER_PROGRESS",
-				"transfer_id":       session.ID,
-				"percentage":        percentage,
-				"bytes_transferred": transferred,
-				"total_bytes":       total,
-				"speed_mbps":        speed,
+				"type":        "TRANSFER_PROGRESS",
+				"transfer_id": session.ID,
+				"transferred": current,
+				"total":       total,
 			}
-
-			encoder.Encode(response)
-
-		case <-stop:
-			return
+			if session.Client != nil {
+				json.NewEncoder(session.Client).Encode(response)
+			}
 		}
 	}
 }
@@ -239,8 +405,9 @@ func sendTransferComplete(session *TransferSession) {
 		"transfer_id": session.ID,
 		"status":      "success",
 	}
-	encoder := json.NewEncoder(session.Client)
-	encoder.Encode(response)
+	if session.Client != nil {
+		json.NewEncoder(session.Client).Encode(response)
+	}
 }
 
 func sendTransferError(session *TransferSession, err error) {
@@ -249,8 +416,9 @@ func sendTransferError(session *TransferSession, err error) {
 		"transfer_id": session.ID,
 		"error":       err.Error(),
 	}
-	encoder := json.NewEncoder(session.Client)
-	encoder.Encode(response)
+	if session.Client != nil {
+		json.NewEncoder(session.Client).Encode(response)
+	}
 }
 
 // CancelTransfer sets the cancellation flag for a given transfer ID
@@ -289,25 +457,83 @@ func StartReceiver(eventsChan chan<- map[string]interface{}) {
 func handleIncomingTransfer(conn net.Conn, eventsChan chan<- map[string]interface{}) {
 	defer conn.Close()
 
-	// 1. Receive file metadata (first 4KB or until newline)
-	// For simplicity in this protocol, we'll wait for a JSON header
-	reader := json.NewDecoder(conn)
-	var header struct {
-		FileName string `json:"file_name"`
-		FileSize int64  `json:"file_size"`
+	key := GetTransferKey()
+	if key == "" {
+		fmt.Printf("❌ No encryption key set, cannot receive file.\n")
+		return
 	}
-
-	if err := reader.Decode(&header); err != nil {
-		fmt.Printf("❌ Failed to decode transfer header: %v\n", err)
+	keyBytes, err := base64.StdEncoding.DecodeString(key)
+	if err != nil {
+		fmt.Printf("❌ Invalid key format: %v\n", err)
 		return
 	}
 
-	destPath := filepath.Join(receiveDir, header.FileName)
+	block, err := aes.NewCipher(keyBytes)
+	if err != nil {
+		fmt.Printf("❌ Failed to create cipher: %v\n", err)
+		return
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		fmt.Printf("❌ Failed to create GCM: %v\n", err)
+		return
+	}
+
+	// --- 1. Read Encrypted Header ---
+	// [Nonce (12)]
+	hNonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(conn, hNonce); err != nil {
+		fmt.Printf("❌ Failed to read header nonce: %v\n", err)
+		return
+	}
+
+	// [Len (4)]
+	var hLen uint32
+	if err := binary.Read(conn, binary.BigEndian, &hLen); err != nil {
+		fmt.Printf("❌ Failed to read header length: %v\n", err)
+		return
+	}
+
+	// [Ciphertext]
+	hCipher := make([]byte, hLen)
+	if _, err := io.ReadFull(conn, hCipher); err != nil {
+		fmt.Printf("❌ Failed to read header cipher: %v\n", err)
+		return
+	}
+
+	// Decrypt
+	hPlain, err := gcm.Open(nil, hNonce, hCipher, nil)
+	if err != nil {
+		fmt.Printf("❌ Failed to decrypt header: %v\n", err)
+		return
+	}
+
+	var header struct {
+		FileName string `json:"file_name"`
+		FileSize int64  `json:"file_size"`
+		FileHash string `json:"file_hash"`
+	}
+	if err := json.Unmarshal(hPlain, &header); err != nil {
+		fmt.Printf("❌ Failed to decode header JSON: %v\n", err)
+		return
+	}
+
+	// Sanitize file path
+	header.FileName = filepath.Base(header.FileName)
+	destPath := getAvailablePath(filepath.Join(receiveDir, header.FileName))
 	fmt.Printf("📥 Receiving file: %s (%d bytes) -> %s\n", header.FileName, header.FileSize, destPath)
 
-	file, err := os.Create(destPath)
+	// Check for resumption
+	var startOffset int64 = 0
+	if info, err := os.Stat(destPath); err == nil {
+		startOffset = info.Size()
+		fmt.Printf("🔄 Resuming from offset: %d\n", startOffset)
+	}
+
+	file, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		fmt.Printf("❌ Failed to create file: %v\n", err)
+		fmt.Printf("❌ Failed to open file: %v\n", err)
 		return
 	}
 	defer file.Close()
@@ -319,26 +545,153 @@ func handleIncomingTransfer(conn net.Conn, eventsChan chan<- map[string]interfac
 		"file_size": header.FileSize,
 	}
 
-	// 2. Stream data from connection to file
-	// We use io.CopyN if we want to be precise based on header
-	start := time.Now()
-	transferred, err := io.CopyN(file, conn, header.FileSize)
-	if err != nil && err != io.EOF {
-		fmt.Printf("❌ Transfer interrupted: %v\n", err)
-		eventsChan <- map[string]interface{}{
-			"type":  "RECEIVE_ERROR",
-			"error": err.Error(),
-		}
+	// --- 2. Read Encrypted File Body ---
+	// Rust sends: [FNonce (12)] then Loop: [CLen (4)][CChunk]
+
+	// Read FNonce
+	fNonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(conn, fNonce); err != nil {
+		fmt.Printf("❌ Failed to read file nonce: %v\n", err)
 		return
 	}
 
-	duration := time.Since(start)
-	fmt.Printf("✅ Received %d bytes in %v\n", transferred, duration)
+	start := time.Now()
+	var totalTransferred int64 = 0
 
-	// Notify complete
-	eventsChan <- map[string]interface{}{
-		"type":      "RECEIVE_COMPLETE",
-		"file_name": header.FileName,
-		"path":      destPath,
+	// Hasher for verification
+	hasher := sha256.New()
+
+	// Read Loop
+	// We reuse buffer. Max chunk size 1MB + overhead.
+	// Rust chunk is 1024*1024. Ciphertext is Chunk + 16 (Tag).
+	chunkBuf := make([]byte, 1024*1024+1024)
+
+	for {
+		var cLen uint32
+		err := binary.Read(conn, binary.BigEndian, &cLen)
+		if err == io.EOF {
+			break // Transfer complete
+		}
+		if err != nil {
+			fmt.Printf("❌ Failed to read chunk length: %v\n", err)
+			break
+		}
+
+		if int(cLen) > len(chunkBuf) {
+			// Resize if needed
+			chunkBuf = make([]byte, cLen+1024)
+		}
+
+		// Read Ciphertext Chunk
+		if _, err := io.ReadFull(conn, chunkBuf[:cLen]); err != nil {
+			fmt.Printf("❌ Failed to read chunk cipher: %v\n", err)
+			break
+		}
+
+		// Decrypt
+		plain, err := gcm.Open(nil, fNonce, chunkBuf[:cLen], nil)
+		if err != nil {
+			fmt.Printf("❌ Failed to decrypt chunk: %v\n", err)
+			break
+		}
+
+		// Write to File
+		if _, err := file.Write(plain); err != nil {
+			fmt.Printf("❌ Failed to write to file: %v\n", err)
+			break
+		}
+		// Write to Hasher
+		if _, err := hasher.Write(plain); err != nil {
+			fmt.Printf("❌ Failed to write to hasher: %v\n", err)
+			break
+		}
+		totalTransferred += int64(len(plain))
+	}
+
+	duration := time.Since(start)
+	if totalTransferred == header.FileSize {
+		// Verify Hash
+		receivedHash := hex.EncodeToString(hasher.Sum(nil))
+		if header.FileHash != "" {
+			if receivedHash == header.FileHash {
+				fmt.Printf("✅ Hash Verified: %s\n", receivedHash)
+			} else {
+				fmt.Printf("❌ Hash Mismatch! Expected: %s, Got: %s\n", header.FileHash, receivedHash)
+				// Rename to .corrupted
+				base := filepath.Base(destPath)
+				os.Rename(destPath, filepath.Join(receiveDir, base+".corrupted"))
+
+				eventsChan <- map[string]interface{}{
+					"type":      "TRANSFER_ERROR",
+					"file_name": header.FileName,
+					"error":     "Hash mismatch - file corrupted",
+				}
+				return
+			}
+		}
+
+		fmt.Printf("✅ Received %d bytes in %v for %s\n", totalTransferred, duration, header.FileName)
+
+		// Store path for post-transfer verification if hash is missing in header
+		if header.FileHash == "" {
+			receivedFilesMu.Lock()
+			receivedFiles[header.FileName] = destPath
+			receivedFilesMu.Unlock()
+
+			eventsChan <- map[string]interface{}{
+				"type":      "RECEIVE_PENDING_VERIFICATION",
+				"file_name": header.FileName,
+			}
+		} else {
+			eventsChan <- map[string]interface{}{
+				"type":      "RECEIVE_COMPLETE",
+				"file_name": header.FileName,
+				"path":      destPath,
+			}
+		}
+	}
+}
+
+// VerifyReceivedFile checks the hash of a recently received file and finalizes its status
+func VerifyReceivedFile(fileName, expectedHash string, eventsChan chan<- map[string]interface{}) {
+	receivedFilesMu.Lock()
+	path, ok := receivedFiles[fileName]
+	delete(receivedFiles, fileName)
+	receivedFilesMu.Unlock()
+
+	if !ok {
+		fmt.Printf("⚠️  Verification failed: No pending file found for %s\n", fileName)
+		return
+	}
+
+	// Calculate local hash again to ensure disk integrity
+	f, err := os.Open(path)
+	if err != nil {
+		fmt.Printf("❌ Failed to open file for verification: %v\n", err)
+		return
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	io.Copy(h, f)
+	actualHash := hex.EncodeToString(h.Sum(nil))
+
+	if actualHash == expectedHash {
+		fmt.Printf("✅ Post-transfer Hash Verified for %s\n", fileName)
+		eventsChan <- map[string]interface{}{
+			"type":      "RECEIVE_COMPLETE",
+			"file_name": fileName,
+			"path":      path,
+		}
+	} else {
+		fmt.Printf("❌ Post-transfer Hash Mismatch for %s\n", fileName)
+		base := filepath.Base(path)
+		os.Rename(path, filepath.Join(receiveDir, base+".corrupted"))
+
+		eventsChan <- map[string]interface{}{
+			"type":      "TRANSFER_ERROR",
+			"file_name": fileName,
+			"error":     "Post-transfer hash mismatch",
+		}
 	}
 }

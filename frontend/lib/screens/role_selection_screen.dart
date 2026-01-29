@@ -15,7 +15,7 @@ class RoleSelectionScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        title: const Text('Choose Your Role'),
+        title: const Text('Join Network'),
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -28,7 +28,7 @@ class RoleSelectionScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'How do you want to use HydraShare today?',
+                'How do you want to join the network today?',
                 style: TextStyle(fontSize: 16, color: Colors.black54),
                 textAlign: TextAlign.center,
               ),
@@ -40,11 +40,12 @@ class RoleSelectionScreen extends StatelessWidget {
                     // Host Option
                     Expanded(
                       child: _RoleCard(
-                        title: 'Send Files',
-                        subtitle: 'I want to share files with someone nearby',
-                        icon: Icons.upload_file_rounded,
+                        title: 'Host Connection',
+                        subtitle: 'Generate a QR code and manage the network',
+                        icon: Icons.hub_rounded,
                         color: Colors.deepPurple,
                         onTap: () {
+                          DaemonService().setRole('host');
                           Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -63,11 +64,12 @@ class RoleSelectionScreen extends StatelessWidget {
                     // Guest Option
                     Expanded(
                       child: _RoleCard(
-                        title: 'Receive Files',
-                        subtitle: 'I want to download files from a host',
-                        icon: Icons.download_rounded,
+                        title: 'Guest Connection',
+                        subtitle: 'Scan a QR code to join an existing network',
+                        icon: Icons.qr_code_scanner_rounded,
                         color: Colors.teal,
                         onTap: () {
+                          DaemonService().setRole('guest');
                           Navigator.push(
                             context,
                             MaterialPageRoute(

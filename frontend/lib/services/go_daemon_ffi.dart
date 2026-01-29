@@ -26,6 +26,17 @@ class GoDaemonFfi {
       } catch (e) {
         debugPrint('❌ Failed to load libraries: $e');
       }
+    } else if (Platform.isWindows) {
+      try {
+        DynamicLibrary.open('hydra_muscle.dll');
+        _lib = DynamicLibrary.open('libhydra_daemon.dll');
+        _isInitialized = true;
+        debugPrint(
+          '✅ Loaded Go Daemon and Hydra Muscle DLLs via FFI (Windows)',
+        );
+      } catch (e) {
+        debugPrint('❌ Failed to load libraries on Windows: $e');
+      }
     }
   }
 

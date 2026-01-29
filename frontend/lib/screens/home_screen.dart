@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
-import '../services/daemon_service.dart';
 import 'package:file_picker/file_picker.dart';
+import '../services/daemon_service.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
+import '../services/notification_service.dart';
+import 'role_selection_screen.dart';
+import 'chat_screen.dart';
+import 'qr_handshake_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final DaemonService daemonService;
@@ -29,10 +34,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           response['type'] == 'RECEIVE_STARTED' ||
           response['type'] == 'TRANSFER_PROGRESS') {
         _updateTransfer(response);
-      } else if (response['type'] == 'TRANSFER_COMPLETE' ||
-          response['type'] == 'RECEIVE_COMPLETE' ||
-          response['type'] == 'TRANSFER_ERROR') {
+      } else if (response['type'] == 'TRANSFER_ERROR') {
         _removeTransfer(response['transfer_id'] ?? response['file_name']);
+      } else if (response['type'] == 'INCOMING_CHAT') {
+        NotificationService().showNotification(
+          id: (response['ip'] ?? 'msg').hashCode,
+          title: 'New Message',
+          body: response['text'] ?? '',
+        );
+      } else if (response['type'] == 'RECEIVE_STARTED') {
+        NotificationService().showNotification(
+          id: (response['file_name'] ?? 'file').hashCode,
+          title: 'Receiving File',
+          body: 'Started receiving ${response['file_name']}',
+        );
       }
     });
   }
@@ -46,6 +61,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (index >= 0) {
         _activeTransfers[index] = {..._activeTransfers[index], ...data};
       } else {
+        if (_activeTransfers.isEmpty) {
+          WakelockPlus.enable();
+          debugPrint('🔆 Wake Lock Enabled');
+        }
         _activeTransfers.add(data);
       }
     });
@@ -57,26 +76,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _activeTransfers.removeWhere(
         (t) => (t['transfer_id'] ?? t['file_name']) == id,
       );
-    });
-  }
-
-  Future<void> _sendFile(String destIp) async {
-    final result = await FilePicker.platform.pickFiles();
-    if (result != null && result.files.single.path != null) {
-      try {
-        await widget.daemonService.sendCommand({
-          'type': 'START_TRANSFER',
-          'file_path': result.files.single.path,
-          'dest_ip': destIp,
-        });
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-          );
-        }
+      if (_activeTransfers.isEmpty) {
+        WakelockPlus.disable();
+        debugPrint('🌑 Wake Lock Disabled');
       }
-    }
+    });
   }
 
   @override
@@ -86,26 +90,45 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       appBar: AppBar(
         title: const Text(
           'HydraShare',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 24),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 24,
+            color: Colors.black87,
+          ),
         ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
+        elevation: 1,
+        foregroundColor: Colors.black87,
         actions: [
+          if (widget.daemonService.currentRole == 'host')
+            IconButton(
+              icon: const Icon(Icons.person_add_alt_1_outlined),
+              tooltip: 'Add Device',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        QrHandshakeScreen(daemonService: widget.daemonService),
+                  ),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             onPressed: () {},
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _pickAndSendFile,
+        icon: const Icon(Icons.send_rounded),
+        label: const Text('Send File'),
+        backgroundColor: Colors.deepPurple,
+        foregroundColor: Colors.white,
+      ),
       body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1A1A2E), Color(0xFF16213E), Color(0xFF0F3460)],
-          ),
-        ),
+        color: Colors.white,
         child: SafeArea(
           child: CustomScrollView(
             slivers: [
@@ -120,61 +143,63 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                         const Text(
                           'Active Transfers',
                           style: TextStyle(
-                            color: Colors.white70,
+                            color: Colors.black87,
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                         const SizedBox(height: 16),
-                        ..._activeTransfers
-                            .map((t) => _buildTransferCard(t))
-                            .toList(),
+                        ..._activeTransfers.map((t) => _buildTransferCard(t)),
                       ],
                     ),
                   ),
                 ),
 
-              // Connected Devices Section
-              SliverPadding(
-                padding: const EdgeInsets.all(20.0),
-                sliver: SliverToBoxAdapter(
-                  child: Row(
-                    children: [
-                      const Text(
-                        'Connected Devices',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
+              // Host Broadcast Row
+              if (widget.daemonService.currentRole == 'host')
+                SliverToBoxAdapter(
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.deepPurple,
+                      child: Icon(Icons.campaign_rounded, color: Colors.white),
+                    ),
+                    title: Text(
+                      'Broadcast Message',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text('Send to all connected guests'),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ChatScreen(
+                            peer: {'ip': 'broadcast', 'name': 'Broadcast'},
+                            daemonService: widget.daemonService,
+                          ),
                         ),
-                      ),
-                      const Spacer(),
-                      StreamBuilder<List<Map<String, dynamic>>>(
-                        stream: widget.daemonService.connectedPeers,
-                        initialData: widget.daemonService.currentPeers,
-                        builder: (context, snapshot) {
-                          final count = snapshot.data?.length ?? 0;
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              '$count Active',
-                              style: const TextStyle(
-                                color: Colors.blueAccent,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ],
+                      );
+                    },
+                  ),
+                ),
+
+              if (widget.daemonService.currentRole == 'host')
+                const SliverToBoxAdapter(child: Divider()),
+
+              // Connected Devices Header
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 8.0,
+                ),
+                sliver: SliverToBoxAdapter(
+                  child: Text(
+                    'CONNECTED DEVICES',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2,
+                    ),
                   ),
                 ),
               ),
@@ -194,30 +219,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             Icon(
                               Icons.devices_other_rounded,
                               size: 80,
-                              color: Colors.white10,
+                              color: Colors.grey[300],
                             ),
                             const SizedBox(height: 16),
                             const Text(
                               'No devices connected',
                               style: TextStyle(
-                                color: Colors.white38,
+                                color: Colors.grey,
                                 fontSize: 18,
                               ),
                             ),
                             const SizedBox(height: 24),
-                            ElevatedButton.icon(
-                              onPressed: () => Navigator.pop(context),
-                              icon: const Icon(Icons.add),
-                              label: const Text('Connect New Device'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white10,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 24,
-                                  vertical: 12,
+                            if (widget.daemonService.currentRole == 'none')
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  Navigator.pushAndRemoveUntil(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const RoleSelectionScreen(),
+                                    ),
+                                    (route) => false,
+                                  );
+                                },
+                                icon: const Icon(Icons.add),
+                                label: const Text('Connect New Device'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.deepPurple,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 24,
+                                    vertical: 12,
+                                  ),
                                 ),
                               ),
-                            ),
                           ],
                         ),
                       ),
@@ -226,13 +261,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
                   return SliverList(
                     delegate: SliverChildBuilderDelegate(
-                      (context, index) => Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20.0,
-                          vertical: 8.0,
-                        ),
-                        child: _buildDeviceCard(peers[index]),
-                      ),
+                      (context, index) => _buildContactItem(peers[index]),
                       childCount: peers.length,
                     ),
                   );
@@ -241,6 +270,69 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _pickAndSendFile() async {
+    final peers = widget.daemonService.currentPeers;
+    if (peers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No peers connected to send file')),
+      );
+      return;
+    }
+
+    try {
+      final result = await FilePicker.platform.pickFiles();
+      if (result != null && result.files.single.path != null) {
+        final filePath = result.files.single.path!;
+
+        if (!mounted) return;
+
+        // If only one peer, send directly (well, send offer)
+        if (peers.length == 1) {
+          final peerIp = peers.first['ip'] ?? peers.first['dest_ip'];
+          widget.daemonService.sendFile(filePath, peerIp);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Sending file offer to $peerIp...')),
+          );
+        } else {
+          // Show dialog to select peer
+          _showPeerSelectionDialog(filePath, peers);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error picking file: $e');
+    }
+  }
+
+  void _showPeerSelectionDialog(
+    String filePath,
+    List<Map<String, dynamic>> peers,
+  ) {
+    showDialog(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Select Recipient'),
+        children: peers.map((peer) {
+          final ip = peer['ip'] ?? peer['dest_ip'];
+          final name = peer['name'] ?? 'Unknown';
+          return SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(context);
+              widget.daemonService.sendFile(filePath, ip);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Sending file offer to $name...')),
+              );
+            },
+            child: ListTile(
+              leading: const Icon(Icons.person),
+              title: Text(name),
+              subtitle: Text(ip),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
@@ -328,104 +420,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildDeviceCard(Map<String, dynamic> peer) {
+  Widget _buildContactItem(Map<String, dynamic> peer) {
     final ip = peer['ip'] ?? peer['dest_ip'] ?? 'Unknown IP';
     final name = peer['name'] ?? 'Nearby Device';
+    final unreadCount = peer['unread_count'] ?? 0;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => _sendFile(ip),
-          borderRadius: BorderRadius.circular(24),
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Row(
-              children: [
-                Stack(
-                  children: [
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.blue.shade400,
-                            Colors.purple.shade400,
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Icon(
-                        Icons.laptop_mac_rounded,
-                        color: Colors.white,
-                        size: 30,
-                      ),
-                    ),
-                    Positioned(
-                      right: 0,
-                      bottom: 0,
-                      child: Container(
-                        width: 14,
-                        height: 14,
-                        decoration: BoxDecoration(
-                          color: Colors.greenAccent,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: const Color(0xFF16213E),
-                            width: 2,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        name,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        ip,
-                        style: const TextStyle(
-                          color: Colors.white38,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.send_rounded,
-                    color: Colors.blueAccent,
-                    size: 20,
-                  ),
-                ),
-              ],
-            ),
-          ),
+    return ListTile(
+      leading: Badge(
+        label: Text(unreadCount.toString()),
+        isLabelVisible: unreadCount > 0,
+        backgroundColor: Colors.redAccent,
+        child: CircleAvatar(
+          backgroundColor: Colors.blue.withOpacity(0.1),
+          child: const Icon(Icons.person, color: Colors.blue),
         ),
       ),
+      title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+      subtitle: Text(ip),
+      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                ChatScreen(peer: peer, daemonService: widget.daemonService),
+          ),
+        );
+      },
     );
   }
 }

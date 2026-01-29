@@ -21,7 +21,7 @@ extern const char *_GoStringPtr(_GoString_ s);
 /* Start of preamble from import "C" comments.  */
 
 
-#line 20 "main.go"
+#line 5 "android.go"
 
 #include <stdlib.h>
 #include <android/log.h>

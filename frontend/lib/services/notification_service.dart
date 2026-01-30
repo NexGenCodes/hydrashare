@@ -12,7 +12,17 @@ class NotificationService {
     const androidSettings = AndroidInitializationSettings(
       '@mipmap/ic_launcher',
     );
-    const initSettings = InitializationSettings(android: androidSettings);
+
+    const windowsSettings = WindowsInitializationSettings(
+      appName: 'HydraShare',
+      appUserModelId: 'com.hydrashare.desktop',
+      guid: 'b8e9d3d4-4f4c-4a3b-9d1a-5e6f7a8b9c0d',
+    );
+
+    const initSettings = InitializationSettings(
+      android: androidSettings,
+      windows: windowsSettings,
+    );
 
     await _notifications.initialize(
       settings: initSettings,
@@ -37,7 +47,10 @@ class NotificationService {
       showWhen: true,
     );
 
-    const notificationDetails = NotificationDetails(android: androidDetails);
+    const notificationDetails = NotificationDetails(
+      android: androidDetails,
+      windows: WindowsNotificationDetails(),
+    );
 
     await _notifications.show(
       id: id,

@@ -403,6 +403,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final name = peer['name'] ?? 'Nearby Device';
     final unreadCount = peer['unread_count'] ?? 0;
 
+    final id = peer['id'] ?? '...';
+    final shortId = id.length > 8 ? id.substring(0, 8) : id;
+
     return ListTile(
       selected: isSelected,
       selectedTileColor: Colors.deepPurple.withOpacity(0.05),
@@ -421,7 +424,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ),
       ),
       title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-      subtitle: Text(ip),
+      subtitle: Text('ID: $shortId'),
       trailing: widget.daemonService.currentRole == 'host'
           ? PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: Colors.grey),

@@ -151,7 +151,8 @@ func handleConnection(conn net.Conn) {
 				json.NewEncoder(conn).Encode(map[string]interface{}{
 					"type":          "PEER_CONNECTED",
 					"status":        "connected",
-					"ip":            peer.ID,
+					"ip":            peer.PublicIP,
+					"id":            peer.ID,
 					"name":          peer.Name,
 					"transfer_port": peer.TransferPort,
 					"mesh_id":       peer.MeshID,
@@ -398,6 +399,7 @@ ScanLoop:
 	encoder.Encode(map[string]interface{}{
 		"type":   "PEER_CONNECTED",
 		"status": "connected",
+		"id":     remoteID,
 		"ip":     connInfo.IP,
 		"name":   peerRegistry.GetPeer(remoteID).Name,
 	})
@@ -455,6 +457,7 @@ func handleConnectPeer(cmd Command, encoder *json.Encoder) {
 	encoder.Encode(map[string]interface{}{
 		"type":   "PEER_CONNECTED",
 		"status": "connected",
+		"id":     remoteID,
 		"ip":     cmd.DestIP,
 		"name":   peerRegistry.GetPeer(remoteID).Name,
 	})

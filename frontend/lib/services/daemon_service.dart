@@ -433,10 +433,10 @@ class DaemonService {
   }
 
   /// Mark messages from a peer as read
-  Future<void> markAsRead(String peerIp) async {
-    await sendCommand({'type': 'MARK_AS_READ', 'dest_ip': peerIp});
+  Future<void> markAsRead(String peerIdOrIp) async {
+    await sendCommand({'type': 'MARK_AS_READ', 'dest_ip': peerIdOrIp});
     final index = _connectedPeers.indexWhere(
-      (p) => (p['ip'] ?? p['dest_ip']) == peerIp,
+      (p) => (p['id'] ?? p['ip'] ?? p['dest_ip']) == peerIdOrIp,
     );
     if (index != -1) {
       _connectedPeers[index]['unread_count'] = 0;
@@ -444,10 +444,10 @@ class DaemonService {
     }
   }
 
-  void _incrementUnread(String? ip) {
-    if (ip == null) return;
+  void _incrementUnread(String? idOrIp) {
+    if (idOrIp == null) return;
     final index = _connectedPeers.indexWhere(
-      (p) => (p['ip'] ?? p['dest_ip']) == ip,
+      (p) => (p['id'] ?? p['ip'] ?? p['dest_ip']) == idOrIp,
     );
     if (index != -1) {
       final current = _connectedPeers[index]['unread_count'] ?? 0;
@@ -472,11 +472,11 @@ class DaemonService {
   }
 
   void _addConnectedPeer(Map<String, dynamic> peer) {
-    final ip = peer['ip'] ?? peer['dest_ip'];
-    if (ip == null) return;
+    final id = peer['id'] ?? peer['ip'] ?? peer['dest_ip'];
+    if (id == null) return;
 
     final index = _connectedPeers.indexWhere(
-      (p) => (p['ip'] ?? p['dest_ip']) == ip,
+      (p) => (p['id'] ?? p['ip'] ?? p['dest_ip']) == id,
     );
 
     if (index != -1) {
@@ -490,9 +490,11 @@ class DaemonService {
   }
 
   void _removeConnectedPeer(Map<String, dynamic> peer) {
-    final ip = peer['ip'] ?? peer['dest_ip'];
-    if (ip != null) {
-      _connectedPeers.removeWhere((p) => (p['ip'] ?? p['dest_ip']) == ip);
+    final id = peer['id'] ?? peer['ip'] ?? peer['dest_ip'];
+    if (id != null) {
+      _connectedPeers.removeWhere(
+        (p) => (p['id'] ?? p['ip'] ?? p['dest_ip']) == id,
+      );
       _connectedPeersController.add(currentPeers);
     }
   }

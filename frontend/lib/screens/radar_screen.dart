@@ -42,8 +42,8 @@ class _RadarScreenState extends State<RadarScreen>
       if (response['type'] == 'PEER_DISCOVERED') {
         final peer = Peer.fromJson(response);
         setState(() {
-          // Avoid duplicates
-          if (!_discoveredPeers.any((p) => p.ip == peer.ip)) {
+          // Avoid duplicates by stable ID
+          if (!_discoveredPeers.any((p) => p.id == peer.id)) {
             _discoveredPeers.add(peer);
           }
         });
@@ -411,7 +411,7 @@ class _RadarScreenState extends State<RadarScreen>
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          '${peer.ip}:${peer.port}',
+                          'ID: ${peer.id.length > 8 ? peer.id.substring(0, 8) : peer.id}',
                           style: TextStyle(fontSize: 14, color: Colors.white60),
                         ),
                       ],

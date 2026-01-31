@@ -29,8 +29,22 @@ class GoDaemonFfi {
     }
   }
 
-  static void startDaemon() {
+  static Future<void> startDaemon() async {
     if (_lib == null) return;
+
+    // Check if daemon is already running (e.g. from previous hot restart)
+    try {
+      final socket = await Socket.connect(
+        'localhost',
+        5050,
+        timeout: const Duration(milliseconds: 500),
+      );
+      debugPrint('ℹ️ Daemon already running on port 5050. Skipping init.');
+      socket.destroy();
+      return;
+    } catch (e) {
+      // Port is free (or at least not accepting connections), proceed with init
+    }
 
     final initDaemon = _lib!
         .lookup<NativeFunction<InitDaemonFunc>>('InitDaemon')

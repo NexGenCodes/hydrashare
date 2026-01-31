@@ -40,6 +40,11 @@ HydraShare is a modern peer-to-peer file sharing application that enables seamle
 
 HydraShare uses a hybrid architecture combining the strengths of multiple technologies:
 
+![HydraShare Architecture](docs/architecture_diagram.png)
+
+<details>
+<summary>Mermaid Source</summary>
+
 ```mermaid
 graph TD
     subgraph Frontend ["Flutter Frontend (UI)"]
@@ -69,6 +74,8 @@ graph TD
     sec -->|CGo| atom
     hsh -->|Verify| db
 ```
+
+</details>
 
 ### Technology Stack
 

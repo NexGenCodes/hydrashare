@@ -101,6 +101,9 @@ class DaemonService {
         final deviceName = await DeviceInfoService.getDeviceName();
         await setDeviceName(deviceName);
 
+        // Sync existing peers (in case daemon was already running)
+        await sendCommand({'type': 'GET_PEERS'});
+
         // Start native foreground service for background survival
         if (Platform.isAndroid) {
           try {

@@ -72,7 +72,7 @@ $cgoLibPath = $BIN_DIR.Replace('\', '/')
 $env:CGO_LDFLAGS = "-L$cgoLibPath -lhydra_muscle -lws2_32 -luserenv -lbcrypt"
 
 Push-Location $DAEMON_DIR
-go build -o bin\hydra_daemon.exe .\cmd\hydra_daemon
+go build -ldflags -H=windowsgui -o bin\hydra_daemon.exe .\cmd\hydra_daemon
 if ($LASTEXITCODE -ne 0) {
     Write-Error-Custom "Go build failed"
     exit 1

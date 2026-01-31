@@ -146,6 +146,41 @@ func handleConnection(conn net.Conn) {
 				MyLog("⚖️ Manual Throttling speed set to: %d ms delay", ms)
 			}
 
+		case "GET_PEERS":
+			for _, peer := range peerRegistry.GetAllPeers() {
+				json.NewEncoder(conn).Encode(map[string]interface{}{
+					"type":          "PEER_CONNECTED",
+					"status":        "connected",
+					"ip":            peer.ID,
+					"name":          peer.Name,
+					"transfer_port": peer.TransferPort,
+					"mesh_id":       peer.MeshID,
+					"mesh_weight":   peer.MeshWeight,
+				})
+			}
+
+		case "MERGE_MESH":
+			// Decide whether to merge based on weight and lexicographical order
+			if cmd.Key != discoveryService.MeshID() {
+				remoteWeight := cmd.HopCount // Reusing HopCount field for Weight to avoid new struct field
+				localWeight := len(peerRegistry.GetAllPeers())
+
+				shouldMerge := false
+				if remoteWeight > localWeight {
+					shouldMerge = true
+				} else if remoteWeight == localWeight && cmd.Key < discoveryService.MeshID() {
+					shouldMerge = true // Tie-breaker: smaller ID wins
+				}
+
+				if shouldMerge {
+					MyLog("🌐 Merging into mesh: %s (Remote Weight: %d, Local: %d)", cmd.Key, remoteWeight, localWeight)
+					// Update MeshID
+					db.SaveConfig("mesh_id", cmd.Key)
+					// In a real app, we would restart discovery here with new ID
+					// discoveryService.UpdateMeshID(cmd.Key)
+				}
+			}
+
 		case "SET_METERED":
 			isMetered := (cmd.Text == "true")
 			connectivity.SetMetered(isMetered)
@@ -230,10 +265,11 @@ func handleStartDiscovery(encoder *json.Encoder) {
 	go func() {
 		for peer := range peersChan {
 			encoder.Encode(PeerDiscoveredEvent{
-				Type: "PEER_DISCOVERED",
-				IP:   peer.IP,
-				Name: peer.Name,
-				Port: peer.Port,
+				Type:   "PEER_DISCOVERED",
+				IP:     peer.IP,
+				Name:   peer.Name,
+				Port:   peer.Port,
+				MeshID: peer.MeshID,
 			})
 		}
 	}()
@@ -242,8 +278,9 @@ func handleStartDiscovery(encoder *json.Encoder) {
 
 func handleStopDiscovery(encoder *json.Encoder) {
 	MyLog("🛑 Stopping peer discovery...")
+	currentMeshID := discoveryService.MeshID()
 	discoveryService.StopDiscovery()
-	discoveryService, _ = discovery.NewService(localName, transferPort)
+	discoveryService, _ = discovery.NewService(localName, transferPort, currentMeshID)
 	discoveryService.StartAdvertising()
 	encoder.Encode(Response{Type: "DISCOVERY_STOPPED", Status: "idle"})
 }
@@ -317,32 +354,52 @@ ScanLoop:
 		"name":          localName,
 		"transfer_port": transferPort,
 		"pin_proof":     connInfo.Key,
+		"mesh_id":       discoveryService.MeshID(),
+		"mesh_weight":   len(peerRegistry.GetAllPeers()),
+		"id":            localID,
 	})
 
+	var remoteID string
 	var hostHandshake map[string]interface{}
 	if err := json.NewDecoder(peerConn).Decode(&hostHandshake); err == nil {
 		hName, _ := hostHandshake["name"].(string)
 		hPort, _ := hostHandshake["transfer_port"].(float64)
 		hKey, _ := hostHandshake["key"].(string)
+		hMeshID, _ := hostHandshake["mesh_id"].(string)
+		hWeight, _ := hostHandshake["mesh_weight"].(float64)
+		hID, _ := hostHandshake["id"].(string)
+
+		remoteID = hID
+		if remoteID == "" {
+			remoteID = connInfo.IP // Fallback for older peers
+		}
+
 		if hKey != "" {
 			transfer.SetTransferKey(hKey)
 		}
 		peerRegistry.RegisterPeer(&mesh.PeerState{
-			ID:           connInfo.IP,
+			ID:           remoteID,
 			Name:         hName,
 			Conn:         peerConn,
 			LocalIPs:     []string{connInfo.IP},
 			Transports:   []string{"router"},
 			TransferPort: int(hPort),
+			MeshID:       hMeshID,
+			MeshWeight:   int(hWeight),
 		})
 	}
 
-	go handlePeerConn(peerConn, connInfo.IP)
+	if remoteID == "" {
+		remoteID = connInfo.IP // Fallback for older peers
+	}
+
+	// Pass the ID to the handler for cleanup
+	go handlePeerConn(peerConn, remoteID)
 	encoder.Encode(map[string]interface{}{
 		"type":   "PEER_CONNECTED",
 		"status": "connected",
 		"ip":     connInfo.IP,
-		"name":   peerRegistry.GetPeer(connInfo.IP).Name,
+		"name":   peerRegistry.GetPeer(remoteID).Name,
 	})
 }
 
@@ -359,28 +416,47 @@ func handleConnectPeer(cmd Command, encoder *json.Encoder) {
 	json.NewEncoder(peerConn).Encode(map[string]interface{}{
 		"name":          localName,
 		"transfer_port": transferPort,
+		"mesh_id":       discoveryService.MeshID(),
+		"mesh_weight":   len(peerRegistry.GetAllPeers()),
+		"id":            localID,
 	})
 
+	var remoteID string
 	var hostHandshake map[string]interface{}
 	if err := json.NewDecoder(peerConn).Decode(&hostHandshake); err == nil {
 		hName, _ := hostHandshake["name"].(string)
 		hPort, _ := hostHandshake["transfer_port"].(float64)
+		hMeshID, _ := hostHandshake["mesh_id"].(string)
+		hWeight, _ := hostHandshake["mesh_weight"].(float64)
+		hID, _ := hostHandshake["id"].(string)
+
+		remoteID = hID
+		if remoteID == "" {
+			remoteID = cmd.DestIP // Fallback
+		}
+
 		peerRegistry.RegisterPeer(&mesh.PeerState{
-			ID:           cmd.DestIP,
+			ID:           remoteID,
 			Name:         hName,
 			Conn:         peerConn,
 			LocalIPs:     []string{cmd.DestIP},
 			Transports:   []string{"router"},
 			TransferPort: int(hPort),
+			MeshID:       hMeshID,
+			MeshWeight:   int(hWeight),
 		})
 	}
 
-	go handlePeerConn(peerConn, cmd.DestIP)
+	if remoteID == "" {
+		remoteID = cmd.DestIP
+	}
+
+	go handlePeerConn(peerConn, remoteID)
 	encoder.Encode(map[string]interface{}{
 		"type":   "PEER_CONNECTED",
 		"status": "connected",
 		"ip":     cmd.DestIP,
-		"name":   peerRegistry.GetPeer(cmd.DestIP).Name,
+		"name":   peerRegistry.GetPeer(remoteID).Name,
 	})
 }
 

@@ -15,7 +15,7 @@ void main() async {
   // Initialize Go Daemon if running on Android
   if (Platform.isAndroid) {
     GoDaemonFfi.init();
-    GoDaemonFfi.startDaemon();
+    await GoDaemonFfi.startDaemon();
   } else if (Platform.isWindows) {
     _startWindowsDaemon();
   } else if (Platform.isMacOS) {

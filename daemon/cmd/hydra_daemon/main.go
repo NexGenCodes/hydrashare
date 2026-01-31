@@ -1,12 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"sync"
 	"time"
 
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"hydra_share/daemon/internal/auth"
 	"hydra_share/daemon/internal/bridge"
@@ -44,10 +46,11 @@ type Response struct {
 }
 
 type PeerDiscoveredEvent struct {
-	Type string `json:"type"`
-	IP   string `json:"ip"`
-	Name string `json:"name"`
-	Port int    `json:"port"`
+	Type   string `json:"type"`
+	IP     string `json:"ip"`
+	Name   string `json:"name"`
+	Port   int    `json:"port"`
+	MeshID string `json:"mesh_id,omitempty"`
 }
 
 type ConnectionInfo struct {
@@ -138,7 +141,22 @@ func StartDaemon() {
 		connManager.CheckConnectivity()
 	}()
 
-	discoveryService, _ = discovery.NewService(localName, 5051)
+	// Load or Generate MeshID
+	meshID, err := db.GetConfig("mesh_id")
+	if err != nil || meshID == "" {
+		// For now, just generate a random UUID-like string
+		// In a real implementation, we might want a more robust ID generation
+		// Using a simple random hex string for simplicity
+		b := make([]byte, 16)
+		_, _ = rand.Read(b)
+		meshID = fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+		db.SaveConfig("mesh_id", meshID)
+		MyLog("🌐 Generated new MeshID: %s", meshID)
+	} else {
+		MyLog("🌐 Loaded MeshID: %s", meshID)
+	}
+
+	discoveryService, _ = discovery.NewService(localName, 5051, meshID)
 	discoveryService.StartAdvertising()
 
 	peerRegistry = mesh.NewPeerRegistry(bridgeService, localID)

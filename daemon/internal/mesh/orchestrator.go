@@ -29,6 +29,8 @@ type PeerState struct {
 	Transports   []string
 	PublicKey    string
 	TransferPort int
+	MeshID       string
+	MeshWeight   int
 }
 
 func NewOrchestrator(hostIP string, registry *PeerRegistry, emitter Emitter) *Orchestrator {

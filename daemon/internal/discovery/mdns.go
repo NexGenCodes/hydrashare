@@ -24,6 +24,7 @@ type Peer struct {
 	Port    int
 	PINHash string // PBKDF2 Hash of PIN
 	Salt    string // Random Salt used for hashing
+	MeshID  string // Unique ID of the mesh this peer belongs to
 }
 
 // Service manages mDNS advertising and discovery
@@ -33,13 +34,14 @@ type Service struct {
 	targetPort int
 	pinHash    string
 	salt       string
+	meshID     string
 	ctx        context.Context
 	cancel     context.CancelFunc
 	peersChan  chan *Peer
 }
 
 // NewService creates a new discovery service
-func NewService(initialName string, initialPort int) (*Service, error) {
+func NewService(initialName string, initialPort int, initialMeshID string) (*Service, error) {
 	if initialName == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
@@ -54,6 +56,7 @@ func NewService(initialName string, initialPort int) (*Service, error) {
 	return &Service{
 		hostname:   initialName,
 		targetPort: initialPort,
+		meshID:     initialMeshID,
 		ctx:        ctx,
 		cancel:     cancel,
 		peersChan:  make(chan *Peer, 10),
@@ -80,6 +83,7 @@ func (s *Service) StartAdvertising() error {
 			fmt.Sprintf("hostname=%s", s.hostname),
 			fmt.Sprintf("pin_hash=%s", s.pinHash),
 			fmt.Sprintf("salt=%s", s.salt),
+			fmt.Sprintf("mesh_id=%s", s.meshID),
 		},
 	)
 	if err != nil {
@@ -129,6 +133,8 @@ func (s *Service) discover() {
 						peer.PINHash = field[9:]
 					} else if len(field) > 5 && field[:5] == "salt=" {
 						peer.Salt = field[5:]
+					} else if len(field) > 8 && field[:8] == "mesh_id=" {
+						peer.MeshID = field[8:]
 					}
 				}
 
@@ -208,4 +214,9 @@ func (s *Service) UpdatePort(port int) {
 		s.StopAdvertising()
 		s.StartAdvertising()
 	}
+}
+
+// MeshID returns the local mesh ID
+func (s *Service) MeshID() string {
+	return s.meshID
 }

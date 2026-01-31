@@ -21,13 +21,23 @@ High-performance file transfer daemon for the HydraShare project, powered by Go 
 
 ### Building
 
-Use the provided PowerShell script:
+Use the provided build scripts:
 
 ```powershell
-.\scripts\build.ps1
+# Windows (PowerShell)
+.\scripts\build.ps1              # Windows only (default)
+.\scripts\build.ps1 -Android     # Android only
+.\scripts\build.ps1 -All         # Both platforms
 ```
 
-This will compile the Rust core and the Go daemon into the `bin/` directory.
+```bash
+# Linux/macOS
+./scripts/build.sh               # Host only (default)
+./scripts/build.sh --android     # Android only
+./scripts/build.sh --all         # Both platforms
+```
+
+This will compile the Rust core (`ring` crypto backend) and the Go daemon into the `bin/` directory.
 
 ### Running Tests
 

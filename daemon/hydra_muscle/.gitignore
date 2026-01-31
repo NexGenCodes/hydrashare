@@ -1,1 +1,9 @@
 /target
+cargo_errors*.txt
+*.rs.bk
+*.h
+*.so
+*.a
+*.dll
+*.lib
+*.exe

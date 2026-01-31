@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:flutter/services.dart';
 import '../services/daemon_service.dart';
 import 'home_screen.dart';
 
@@ -15,13 +16,14 @@ class QrHandshakeScreen extends StatefulWidget {
 
 class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
   String? _generatedKey;
+  String? _displayPin;
   bool _isGenerating = false;
   late StreamSubscription _connectionSubscription;
 
   @override
   void initState() {
     super.initState();
-    _connectDaemon().then((_) => _generateCode());
+    _generateCode();
 
     // Listen for peer connection
     _connectionSubscription = widget.daemonService.responses.listen((response) {
@@ -52,23 +54,30 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
     super.dispose();
   }
 
-  Future<void> _connectDaemon() async {
-    try {
-      await widget.daemonService.connect();
-    } catch (e) {
-      debugPrint('Error connecting to daemon: $e');
-    }
-  }
-
   Future<void> _generateCode() async {
     setState(() {
       _isGenerating = true;
     });
 
     try {
+      // Check if daemon is connected
+      if (!widget.daemonService.isConnected) {
+        debugPrint('⚠️ Daemon not connected, attempting to connect...');
+        await widget.daemonService.connect();
+      }
+
       final result = await widget.daemonService.generateCodeWithIP();
       setState(() {
-        _generatedKey = '${result['ip']}|${result['key']}';
+        final ip = result['ip'];
+        final key = result['key'];
+        final pin = result['pin'];
+
+        // QR Code = IP|KEY (for secure scanning)
+        _generatedKey = '$ip|$key';
+
+        // Display PIN = PIN (for manual entry)
+        _displayPin = pin;
+
         _isGenerating = false;
       });
     } catch (e) {
@@ -143,16 +152,21 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
 
               // Content area
               Expanded(
-                child: Center(
-                  child: _isGenerating
-                      ? const CircularProgressIndicator()
-                      : _generatedKey != null
-                      ? _buildQrCodeView()
-                      : _buildErrorState(),
+                child: SingleChildScrollView(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Center(
+                      child: _isGenerating
+                          ? const CircularProgressIndicator()
+                          : _generatedKey != null
+                          ? _buildQrCodeView()
+                          : _buildErrorState(),
+                    ),
+                  ),
                 ),
               ),
 
-              const SizedBox(height: 40),
+              const SizedBox(height: 16),
             ],
           ),
         ),
@@ -161,6 +175,155 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
   }
 
   Widget _buildQrCodeView() {
+    // Check if running on likely desktop platform
+    final isDesktop =
+        Theme.of(context).platform == TargetPlatform.windows ||
+        Theme.of(context).platform == TargetPlatform.macOS ||
+        Theme.of(context).platform == TargetPlatform.linux;
+
+    if (isDesktop) {
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // QR Code (Left)
+          Hero(
+            tag: 'qr-code-hero',
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: QrImageView(
+                data: _generatedKey!,
+                version: QrVersions.auto,
+                size: 200.0, // Smaller on desktop to save space
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(
+                  eyeShape: QrEyeShape.square,
+                  color: Colors.deepPurple,
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.square,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 48),
+
+          // PIN Display (Right, Larger)
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'PAIRING WITH DESKTOP?',
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.0,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 48,
+                  vertical: 32,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: Colors.deepPurple.withOpacity(0.2)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.deepPurple.withOpacity(0.05),
+                      blurRadius: 20,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      'ENTER THIS PIN',
+                      style: TextStyle(
+                        color: Colors.deepPurple.shade700,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SelectableText(
+                      _displayPin ?? '??????',
+                      style: const TextStyle(
+                        fontSize: 64, // HUGE PIN
+                        fontWeight: FontWeight.bold,
+                        color: Colors.deepPurple,
+                        letterSpacing: 8,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        if (_displayPin != null) {
+                          Clipboard.setData(ClipboardData(text: _displayPin!));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('PIN copied to clipboard'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.copy, size: 18),
+                      label: const Text('Copy PIN'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepPurple.shade50,
+                        foregroundColor: Colors.deepPurple,
+                        elevation: 0,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Waiting for connection...',
+                    style: TextStyle(
+                      color: Colors.deepPurple.shade700,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    // MOBILE LAYOUT (Original)
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -181,9 +344,9 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
               ],
             ),
             child: QrImageView(
-              data: _generatedKey!,
+              data: _generatedKey!, // Contains IP|PIN for mobile scanning
               version: QrVersions.auto,
-              size: 280.0,
+              size: 280.0, // Increased size
               backgroundColor: Colors.white,
               eyeStyle: const QrEyeStyle(
                 eyeShape: QrEyeShape.square,
@@ -196,6 +359,43 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
             ),
           ),
         ),
+
+        const SizedBox(height: 32),
+
+        // PIN Display (Text)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.deepPurple.shade50,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.deepPurple.shade200),
+          ),
+          child: Column(
+            children: [
+              Text(
+                'PAIRING PIN',
+                style: TextStyle(
+                  color: Colors.deepPurple.shade700,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.5,
+                ),
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                _displayPin ?? '??????',
+                style: const TextStyle(
+                  fontSize: 32, // Smaller size
+                  fontWeight: FontWeight.bold,
+                  color: Colors.deepPurple,
+                  letterSpacing: 6,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ),
+        ),
+
         const SizedBox(height: 32),
         // Wait indicator
         Container(

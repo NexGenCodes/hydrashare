@@ -49,5 +49,13 @@
 		<true/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>
 		<false/>
+		<key>NSCameraUsageDescription</key>
+		<string>HydraShare needs camera access to scan QR codes for connecting to other devices.</string>
+		<key>NSLocalNetworkUsageDescription</key>
+		<string>HydraShare uses the local network to discover and connect to nearby devices for file sharing.</string>
+		<key>NSBonjourServices</key>
+		<array>
+			<string>_hydra._tcp</string>
+		</array>
 	</dict>
 </plist>

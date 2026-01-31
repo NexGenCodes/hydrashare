@@ -8,15 +8,17 @@ HydraShare is a modern peer-to-peer file sharing application that enables seamle
 
 ### 🔐 Security
 
-- **End-to-End Encryption**: AES-256 encryption for all file transfers
+- **End-to-End Encryption**: AES-256-GCM encryption for all file transfers
 - **QR Code Handshake**: Secure peer discovery and key exchange via QR codes
-- **File Validation**: SHA-256 hash verification for data integrity
+- **File Validation**: Real-time SHA-256 streaming hash verification for data integrity
 - **Proximity-Based Auto-Disconnect**: Automatic disconnection when devices move apart
+- **Atomic Cancellation**: Instant, thread-safe transfer cancellation via atomic signaling
 
 ### ⚡ Performance
 
-- **Zero-Copy I/O**: Platform-optimized file transfers using Rust (`sendfile` on Linux, `TransmitFile` on Windows)
-- **Resumable Transfers**: Automatic resumption of interrupted transfers
+- **Zero-Copy I/O**: Platform-optimized file transfers using Rust
+- **Adaptive Throttling**: Intelligent bandwidth management based on network conditions
+- **Resumable Transfers**: Persistent queue with automatic resumption from byte offsets
 - **Multi-Hop Relay**: Mesh networking for extended range through relay nodes
 
 ### 🎯 User Experience
@@ -30,48 +32,52 @@ HydraShare is a modern peer-to-peer file sharing application that enables seamle
 ### 🌐 Networking
 
 - **mDNS Discovery**: Automatic peer discovery on local networks
+- **Hybrid Transport**: Supports both QUIC/UDP (performance) and TCP (fallback)
 - **Mesh Networking**: Guest-to-Guest direct connections via host relay
-- **Low Power Mode**: Optional relay disabling for battery conservation
-- **Multiple Transports**: Wi-Fi, Bluetooth (planned), and USB (planned)
+- **Multiple Transports**: Wi-Fi, Bluetooth, and USB RNDIS support
 
 ## 🏗️ Architecture
 
 HydraShare uses a hybrid architecture combining the strengths of multiple technologies:
 
-```
-┌─────────────────────────────────────────┐
-│         Flutter Frontend (UI)           │
-│  • QR Scanner & Generator               │
-│  • File Picker & Transfer UI            │
-│  • Chat Interface                       │
-│  • Device Management                    │
-└──────────────┬──────────────────────────┘
-               │ FFI Bridge
-┌──────────────▼──────────────────────────┐
-│       Go Daemon (Business Logic)        │
-│  • Peer Discovery (mDNS)                │
-│  • Encryption & Key Management          │
-│  • Transfer Coordination                │
-│  • Mesh Orchestration                   │
-│  • SQLite Database                      │
-└──────────────┬──────────────────────────┘
-               │ CGo
-┌──────────────▼──────────────────────────┐
-│      Rust Core (I/O Performance)        │
-│  • Zero-Copy File Transfers             │
-│  • Platform-Specific Optimizations      │
-│  • sendfile / TransmitFile              │
-└─────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Frontend ["Flutter Frontend (UI)"]
+        UI[QR Scanner & Generator]
+        TP[File Picker & Transfer UI]
+        CH[Chat Interface]
+        DM[Device Management]
+    end
+
+    subgraph Backend ["Go Daemon (Business Logic)"]
+        disc[mDNS Peer Discovery]
+        sec[Encryption & Key Management]
+        coord[Transfer Coordination]
+        mesh[Mesh Orchestration]
+        db[(SQLite Database)]
+    end
+
+    subgraph Core ["Rust Core (I/O Performance)"]
+        mod[Modular Engine: common, hash, tcp, quic]
+        atom[Atomic Cancellation & Flow Control]
+        hsh[Streaming SHA-256 Hashing]
+    end
+
+    UI -->|FFI Bridge| disc
+    DM -->|FFI Bridge| db
+    coord -->|CGo| mod
+    sec -->|CGo| atom
+    hsh -->|Verify| db
 ```
 
 ### Technology Stack
 
 - **Frontend**: Flutter 3.10+ (Dart)
-- **Backend**: Go 1.25+ (Business Logic & Networking)
-- **I/O Core**: Rust (Zero-Copy File Operations)
-- **Database**: SQLite (Message & Transfer History)
+- **Backend**: Go 1.25+ (Logic, Networking, & SQLite)
+- **I/O Core**: Modular Rust (Encrypted Streaming & QUIC)
+- **Database**: SQLite (Message & Queue Persistence)
 - **Discovery**: mDNS (Hashicorp mdns)
-- **Encryption**: AES-256 (Go crypto)
+- **Encryption**: AES-256-GCM
 
 ## 📦 Project Structure
 
@@ -80,38 +86,32 @@ hydrashare/
 ├── daemon/                 # Go backend daemon
 │   ├── cmd/
 │   │   └── hydra_daemon/  # Main daemon entry point
-│   │       ├── main.go    # Core daemon logic
-│   │       ├── android.go # Android-specific FFI bridge
-│   │       └── ffi_bridge.go # Desktop FFI bridge
-│   ├── internal/          # Internal packages
-│   │   ├── connectivity/  # Network connectivity manager
+│   ├── internal/          # Internal modular packages
+│   │   ├── connectivity/  # Network & Throttling
 │   │   ├── discovery/     # mDNS peer discovery
-│   │   ├── mesh/          # Mesh networking orchestrator
-│   │   ├── storage/       # SQLite database wrapper
-│   │   └── transfer/      # File transfer management
-│   ├── hydra_muscle/      # Rust I/O core
+│   │   ├── mesh/          # Mesh & Orchestration
+│   │   ├── storage/       # SQLite & Queueing
+│   │   └── transfer/      # Session & Data Flow
+│   ├── hydra_muscle/      # Modular Rust I/O core
 │   │   ├── src/
-│   │   │   └── lib.rs     # Zero-copy transfer implementations
+│   │   │   ├── common.rs  # Shared types & errors
+│   │   │   ├── hash.rs    # Hashing logic
+│   │   │   ├── tcp.rs     # Encrypted TCP data plane
+│   │   │   ├── quic.rs    # QUIC transport
+│   │   │   └── lib.rs     # FFI Gateway
 │   │   └── Cargo.toml
-│   └── scripts/           # Build & test automation
+│   └── scripts/           # Build automation
 │
 ├── frontend/              # Flutter mobile/desktop app
 │   ├── lib/
 │   │   ├── screens/       # UI screens
-│   │   │   ├── onboarding_screen.dart
-│   │   │   ├── role_selection_screen.dart
-│   │   │   ├── qr_handshake_screen.dart
-│   │   │   ├── qr_scanner_screen.dart
-│   │   │   ├── home_screen.dart
-│   │   │   ├── chat_screen.dart
-│   │   │   └── radar_screen.dart
-│   │   ├── services/      # Business logic services
-│   │   │   ├── daemon_service.dart
-│   │   │   └── notification_service.dart
-│   │   └── widgets/       # Reusable UI components
-│   └── android/           # Android-specific configuration
+│   │   ├── services/      # Daemon & Notify services
+│   │   └── widgets/       # UI components
+│   └── android/           # Android JNI/FFI setup
 │
-└── README.md              # This file
+└── README.md              # Project documentation
+```
+
 ```
 
 ## 🚀 Getting Started
@@ -143,7 +143,7 @@ hydrashare/
    cd hydrashare
    ```
 
-2. **Build the Rust core**
+1. **Build the Rust core**
 
    ```bash
    cd daemon/hydra_muscle
@@ -151,7 +151,7 @@ hydrashare/
    cd ../..
    ```
 
-3. **Build the Go daemon**
+2. **Build the Go daemon**
 
    **Windows:**
 
@@ -167,7 +167,7 @@ hydrashare/
    ./scripts/build.sh
    ```
 
-4. **Build the Flutter app**
+3. **Build the Flutter app**
 
    ```bash
    cd frontend

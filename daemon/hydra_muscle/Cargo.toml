@@ -10,6 +10,10 @@ crate-type = ["cdylib", "staticlib"]  # Build as C-compatible dynamic & static l
 sha2 = "0.10"
 aes-gcm = "0.10.3"
 rand = "0.8"
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+tokio = { version = "1", features = ["full"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
 
 # Windows-specific dependencies for TransmitFile
 [target.'cfg(windows)'.dependencies]

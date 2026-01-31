@@ -1,8 +1,10 @@
 package connectivity
 
 import (
+	"fmt"
 	"log"
 	"net"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -13,15 +15,21 @@ type NetworkType int
 const (
 	None NetworkType = iota
 	Ethernet
-	WiFi
+	WiFiDirect
 	Hotspot
+	WiFi
 )
+
+// Emitter defines a generic interface for sending events to the UI/Bridge
+type Emitter interface {
+	Emit(event interface{})
+}
 
 // Manager handles network connectivity logic
 type Manager struct {
-	EventsChan chan<- map[string]interface{}
-	Proximity  map[string]*PeerProximity
-	ProxMu     sync.RWMutex
+	Emitter   Emitter
+	Proximity map[string]*PeerProximity
+	ProxMu    sync.RWMutex
 }
 
 type PeerProximity struct {
@@ -30,10 +38,10 @@ type PeerProximity struct {
 	Samples    []time.Duration
 }
 
-func NewManager(eventsChan chan<- map[string]interface{}) *Manager {
+func NewManager(emitter Emitter) *Manager {
 	return &Manager{
-		EventsChan: eventsChan,
-		Proximity:  make(map[string]*PeerProximity),
+		Emitter:   emitter,
+		Proximity: make(map[string]*PeerProximity),
 	}
 }
 
@@ -48,7 +56,6 @@ func (m *Manager) CheckConnectivity() NetworkType {
 	bestType := None
 
 	for _, iface := range interfaces {
-		// Skip loopback and down interfaces
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
 			continue
 		}
@@ -60,20 +67,37 @@ func (m *Manager) CheckConnectivity() NetworkType {
 
 		name := strings.ToLower(iface.Name)
 
-		// Heuristic detection based on common interface names
+		// 1. Ethernet (Highest Priority)
 		if isEthernet(name) {
-			return Ethernet // Highest priority
+			return Ethernet
 		}
 
+		// 2. WiFi Direct / P2P
+		if isWiFiDirect(name) {
+			if bestType == None || bestType > WiFiDirect {
+				bestType = WiFiDirect
+			}
+			continue
+		}
+
+		// 3. Hotspot / Access Point
+		if isHotspot(name) {
+			if bestType == None || bestType > Hotspot {
+				bestType = Hotspot
+			}
+			continue
+		}
+
+		// 4. Standard WiFi
 		if isWiFi(name) {
-			if bestType < WiFi {
+			if bestType == None || bestType > WiFi {
 				bestType = WiFi
 			}
 		}
 	}
 
 	if bestType == None {
-		log.Println("🌲 Forest Mode: No router found, triggering WIFI_DIRECT_REQ")
+		log.Println("🌲 Forest Mode: No suitable network found, triggering WIFI_DIRECT_REQ")
 		m.triggerWiFiDirect()
 	}
 
@@ -84,16 +108,24 @@ func isEthernet(name string) bool {
 	return strings.Contains(name, "eth") || strings.Contains(name, "en") || strings.Contains(name, "ethernet")
 }
 
+func isWiFiDirect(name string) bool {
+	return strings.Contains(name, "p2p") || strings.Contains(name, "wlan-p2p") || strings.Contains(name, "direct")
+}
+
+func isHotspot(name string) bool {
+	return strings.Contains(name, "ap0") || strings.Contains(name, "softap") || strings.Contains(name, "hotspot")
+}
+
 func isWiFi(name string) bool {
 	return strings.Contains(name, "wlan") || strings.Contains(name, "wifi") || strings.Contains(name, "wireless")
 }
 
 func (m *Manager) triggerWiFiDirect() {
-	if m.EventsChan != nil {
-		m.EventsChan <- map[string]interface{}{
+	if m.Emitter != nil {
+		m.Emitter.Emit(map[string]interface{}{
 			"type":   "WIFI_DIRECT_REQ",
 			"status": "searching",
-		}
+		})
 	}
 }
 
@@ -206,12 +238,57 @@ func (m *Manager) updateProximity(ip string, rtt time.Duration) {
 	// If average RTT > 1 second over 5 samples, trigger disconnect warning
 	if p.AverageRTT > 1000*time.Millisecond && len(p.Samples) >= 5 {
 		log.Printf("🚨 Proximity Alert: %s is drifting (Avg RTT: %v)", ip, p.AverageRTT)
-		if m.EventsChan != nil {
-			m.EventsChan <- map[string]interface{}{
+		if m.Emitter != nil {
+			m.Emitter.Emit(map[string]interface{}{
 				"type":    "PROXIMITY_WARNING",
 				"peer_ip": ip,
 				"avg_rtt": p.AverageRTT.String(),
+			})
+		}
+	}
+}
+
+// MonitorSignalStrength watches for RSSI drops and warns the UI
+func (m *Manager) MonitorSignalStrength() {
+	ticker := time.NewTicker(10 * time.Second)
+	go func() {
+		for range ticker.C {
+			signal := m.getSignalStrength()
+			if signal > 0 && signal < 30 { // 30% roughly maps to -85dBm
+				log.Printf("⚠️  Low Signal Warning: %d%%", signal)
+				if m.Emitter != nil {
+					m.Emitter.Emit(map[string]interface{}{
+						"type":   "LOW_SIGNAL_WARNING",
+						"signal": signal,
+					})
+				}
+			}
+		}
+	}()
+}
+
+func (m *Manager) getSignalStrength() int {
+	return getWindowsSignal()
+}
+
+func getWindowsSignal() int {
+	out, err := exec.Command("netsh", "wlan", "show", "interfaces").Output()
+	if err != nil {
+		return 100 // Fallback
+	}
+
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Signal") {
+			parts := strings.Split(line, ":")
+			if len(parts) > 1 {
+				sigStr := strings.TrimSpace(parts[1])
+				sigStr = strings.TrimSuffix(sigStr, "%")
+				var sig int
+				fmt.Sscanf(sigStr, "%d", &sig)
+				return sig
 			}
 		}
 	}
+	return 100
 }

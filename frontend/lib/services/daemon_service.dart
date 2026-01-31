@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'device_info_service.dart';
+import 'storage_service.dart';
 
 /// Service class for managing persistent TCP connection to Go daemon
 class DaemonService {
@@ -24,10 +26,12 @@ class DaemonService {
   final _connectedPeersController =
       StreamController<List<Map<String, dynamic>>>.broadcast();
   final List<Map<String, dynamic>> _connectedPeers = [];
+  Timer? _pingTimer;
 
   final _chatController = StreamController<Map<String, dynamic>>.broadcast();
   final _fileOfferController =
       StreamController<Map<String, dynamic>>.broadcast();
+  final _warningController = StreamController<Map<String, dynamic>>.broadcast();
 
   String _currentRole = 'none'; // 'host', 'guest', or 'none'
 
@@ -48,6 +52,9 @@ class DaemonService {
   /// Stream of incoming file offers
   Stream<Map<String, dynamic>> get fileOffers => _fileOfferController.stream;
 
+  /// Stream of network/proximity warnings
+  Stream<Map<String, dynamic>> get warnings => _warningController.stream;
+
   /// Check if currently connected to daemon
   bool get isConnected => _isConnected;
 
@@ -62,9 +69,14 @@ class DaemonService {
   }
 
   /// Connect to the Go daemon and start listening for responses
-  Future<void> connect({int retries = 5}) async {
-    if (_isConnected && _socket != null) {
+  Future<void> connect({int retries = 20}) async {
+    if (_isConnected) {
       debugPrint('ℹ️ Already connected to Go daemon');
+      return;
+    }
+
+    if (kIsWeb) {
+      // Web support removed for native desktop migration
       return;
     }
 
@@ -83,6 +95,7 @@ class DaemonService {
 
         debugPrint('✅ Connected to Go daemon');
         _startListening();
+        _startPing();
 
         // Automatically register device name with daemon
         final deviceName = await DeviceInfoService.getDeviceName();
@@ -131,15 +144,47 @@ class DaemonService {
               _removeConnectedPeer(response);
             } else if (response['type'] == 'WIFI_DIRECT_REQ') {
               _handleWiFiDirectRequest();
+            } else if (response['type'] == 'PEER_DISCOVERED') {
+              // Discovery Radar update:handled by the stream, but we can log it
+              debugPrint(
+                '🔭 Peer discovered on network: ${response['name']} (${response['ip']})',
+              );
+            } else if (response['type'] == 'PEER_DISCOVERY_CARD') {
+              // G2G Mesh Introduction
+              debugPrint(
+                '🤝 Hub introduced us to new guest: ${response['name']}',
+              );
+              _handleMeshIntroduction(response);
+            } else if (response['type'] == 'RECEIVE_STARTED') {
+              debugPrint(
+                '📥 Incoming transfer started from: ${response['ip']}',
+              );
+              // This can trigger a global snackbar or notification in higher-level widgets
             } else if (response['type'] == 'INCOMING_CHAT') {
+              final peerIp = response['ip'] ?? 'Broadcast';
+              StorageService().saveMessage(
+                peerIp: peerIp,
+                text: response['text'] ?? '',
+                isMe: false,
+              );
               _chatController.add(response);
               if (response['unread'] == true) {
                 _incrementUnread(response['ip']);
               }
             } else if (response['type'] == 'FILE_OFFER') {
+              final peerIp = response['ip'] ?? 'Broadcast';
+              StorageService().saveMessage(
+                peerIp: peerIp,
+                text: '📎 Incoming file: ${response['file_name']}',
+                isMe: false,
+                type: 'file_offer',
+                extra: {
+                  'file_name': response['file_name'],
+                  'offer_id': response['offer_id'],
+                },
+              );
               _fileOfferController.add(response);
             } else if (response['type'] == 'TRANSFER_REJECTED') {
-              // Optionally handle rejection specifically or just let response stream handle it
               debugPrint('❌ File transfer rejected by peer');
             }
           } catch (e) {
@@ -160,7 +205,7 @@ class DaemonService {
 
   /// Send a command to the daemon
   Future<void> sendCommand(Map<String, dynamic> command) async {
-    if (!_isConnected || _socket == null) {
+    if (!_isConnected) {
       throw Exception('Not connected to daemon');
     }
 
@@ -168,8 +213,14 @@ class DaemonService {
       final jsonString = jsonEncode(command);
       debugPrint('📤 Sending to daemon: $jsonString');
 
-      _socket!.write('$jsonString\n');
-      await _socket!.flush();
+      if (kIsWeb) {
+        // Web support removed
+        return;
+      } else {
+        if (_socket == null) throw Exception('Socket unavailable');
+        _socket!.write('$jsonString\n');
+        await _socket!.flush();
+      }
     } catch (e) {
       debugPrint('❌ Failed to send command: $e');
       rethrow;
@@ -228,11 +279,20 @@ class DaemonService {
     final completer = Completer<Map<String, String>>();
 
     // Listen for the response
-    final subscription = responses.listen((response) {
+    final subscription = responses.listen((response) async {
       if (response['type'] == 'CODE_GENERATED') {
+        String ip = response['ip'] as String? ?? '127.0.0.1';
+
+        // If daemon reports loopback, try to find the real local IP
+        if (ip == '127.0.0.1' || ip == 'localhost' || ip == '::1') {
+          final localIp = await _getLocalIp();
+          if (localIp != null) ip = localIp;
+        }
+
         completer.complete({
           'key': response['key'] as String,
-          'ip': response['ip'] as String? ?? '127.0.0.1',
+          'pin': response['pin'] as String? ?? '',
+          'ip': ip,
         });
       } else if (response['type'] == 'ERROR') {
         completer.completeError(response['error'] ?? 'Unknown error');
@@ -258,13 +318,8 @@ class DaemonService {
     }
   }
 
-  /// Set local device name in daemon
-  Future<void> setDeviceName(String name) async {
-    await sendCommand({'type': 'SET_DEVICE_NAME', 'name': name});
-  }
-
-  /// Connect to a peer using the scanned code/IP
-  Future<void> connectToPeer(String code) async {
+  /// Connect to the host using a 6-digit PIN
+  Future<void> connectWithPIN(String pin) async {
     final completer = Completer<void>();
 
     // Listen for the response
@@ -277,11 +332,58 @@ class DaemonService {
     });
 
     // Send the command
-    final localName = await DeviceInfoService.getDeviceName();
+    await sendCommand({'type': 'CONNECT_WITH_PIN', 'key': pin});
+
+    // Wait for response with timeout
+    try {
+      await completer.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw TimeoutException('Connection timed out');
+        },
+      );
+      await subscription.cancel();
+    } catch (e) {
+      await subscription.cancel();
+      rethrow;
+    }
+  }
+
+  /// Set local device name in daemon
+  Future<void> setDeviceName(String name) async {
+    await sendCommand({'type': 'SET_DEVICE_NAME', 'name': name});
+  }
+
+  /// Connect to a peer using the scanned code/IP
+  Future<void> connectToPeer(String code, {String? key}) async {
+    final completer = Completer<void>();
+
+    // Listen for the response
+    final subscription = responses.listen((response) {
+      if (response['type'] == 'PEER_CONNECTED') {
+        completer.complete();
+      } else if (response['type'] == 'ERROR') {
+        completer.completeError(response['error'] ?? 'Unknown error');
+      }
+    });
+
+    // Parse the code: format is "ip|key" or just "ip" if key is provided separately
+    String targetIp;
+    String? encryptionKey = key;
+
+    if (code.contains('|') && key == null) {
+      final parts = code.split('|');
+      targetIp = parts[0];
+      encryptionKey = parts.length > 1 ? parts[1] : null;
+    } else {
+      targetIp = code;
+    }
+
+    // Send the command
     await sendCommand({
       'type': 'CONNECT_PEER',
-      'dest_ip': code,
-      'name': localName, // Tell them who we are
+      'dest_ip': targetIp,
+      if (encryptionKey != null) 'key': encryptionKey,
     });
 
     // Wait for response with timeout
@@ -301,11 +403,17 @@ class DaemonService {
 
   /// Send a private chat message to a peer
   Future<void> sendChat(String peerIp, String text) async {
+    await StorageService().saveMessage(peerIp: peerIp, text: text, isMe: true);
     await sendCommand({'type': 'SEND_CHAT', 'dest_ip': peerIp, 'text': text});
   }
 
   /// Broadcast a chat message to all connected peers (Host only)
   Future<void> broadcastChat(String text) async {
+    await StorageService().saveMessage(
+      peerIp: 'broadcast',
+      text: text,
+      isMe: true,
+    );
     await sendCommand({'type': 'BROADCAST_CHAT', 'text': text});
   }
 
@@ -316,6 +424,7 @@ class DaemonService {
     await _socket?.close();
     _socket = null;
     _isConnected = false;
+    _pingTimer?.cancel();
 
     debugPrint('✅ Disconnected');
   }
@@ -342,6 +451,21 @@ class DaemonService {
       _connectedPeers[index]['unread_count'] = current + 1;
       _connectedPeersController.add(currentPeers);
     }
+  }
+
+  void _handleMeshIntroduction(Map<String, dynamic> card) {
+    final ips = card['ips'] as List<dynamic>?;
+    final ip = (ips != null && ips.isNotEmpty)
+        ? ips[0].toString()
+        : card['peer_id'].toString();
+
+    _responseController.add({
+      'type': 'PEER_DISCOVERED',
+      'ip': ip,
+      'name': card['name'] ?? 'Mesh Guest',
+      'port': 5051,
+      'is_mesh_intro': true,
+    });
   }
 
   void _addConnectedPeer(Map<String, dynamic> peer) {
@@ -376,6 +500,7 @@ class DaemonService {
     _connectedPeersController.close();
     _chatController.close();
     _fileOfferController.close();
+    _warningController.close();
     _socket?.destroy();
   }
 
@@ -413,5 +538,65 @@ class DaemonService {
       'offer_id': offerId,
       'dest_ip': destIp,
     });
+  }
+
+  void _startPing() {
+    _pingTimer?.cancel();
+    _pingTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
+      if (_isConnected) {
+        ping().catchError((e) {
+          debugPrint('📡 Keep-alive ping failed: $e');
+        });
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  /// Admin: Disconnect a peer (Kick)
+  Future<void> disconnectPeer(String ip) async {
+    await sendCommand({'type': 'DISCONNECT_PEER', 'dest_ip': ip});
+  }
+
+  /// Admin: Ban a peer (Block IP)
+  Future<void> banPeer(String ip) async {
+    await sendCommand({'type': 'BAN_PEER', 'dest_ip': ip});
+  }
+
+  /// Admin: Mute or Unmute a peer
+  Future<void> mutePeer(String ip, bool mute) async {
+    await sendCommand({
+      'type': 'MUTE_PEER',
+      'dest_ip': ip,
+      'text': mute.toString(),
+    });
+  }
+
+  /// Settings: Set Max File Size
+  Future<void> setMaxFileSize(int bytes) async {
+    await sendCommand({
+      'type': 'SET_SETTINGS',
+      'key': 'max_file_size',
+      'text': bytes.toString(),
+    });
+  }
+
+  Future<String?> _getLocalIp() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          if (!addr.isLoopback) {
+            return addr.address;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error getting local IP: $e');
+    }
+    return null;
   }
 }

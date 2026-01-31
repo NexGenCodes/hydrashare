@@ -1,697 +1,295 @@
 package transfer
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/binary"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net"
+	"hydra_share/daemon/internal/connectivity"
+	"hydra_share/daemon/internal/muscle"
+	"hydra_share/daemon/internal/storage"
+	"log"
 	"os"
 	"path/filepath"
-	"runtime/cgo"
 	"sync"
 	"time"
-	"unsafe"
 )
 
-/*
-#cgo LDFLAGS: -L${SRCDIR}/../../ -L${SRCDIR}/../../../ -lhydra_muscle
-#include <stdint.h>
-#include <stdlib.h>
-#include "../../hydra_muscle/hydra_muscle.h"
-#ifndef HYDRA_TYPES
-#define HYDRA_TYPES
-typedef int64_t hydra_i64;
-#endif
-extern void goProgressCallback(int64_t transferred, int64_t total, void* user_data);
-*/
-import "C"
+type Emitter interface {
+	Emit(event interface{})
+}
+
+type Messenger interface {
+	CoordinateG2GTransfer(senderID, receiverID, fileName, transferID string, startOffset int64) error
+}
 
 var (
 	transferSessions = make(map[string]*TransferSession)
 	sessionsMu       sync.RWMutex
 	receiveDir       string
+	transferKey      string
+	transferKeyMu    sync.RWMutex
+	receivedFiles    = make(map[string]string)
+	receivedFilesMu  sync.Mutex
+	maxFileSize      int64 = 0
+	maxFileSizeMu    sync.RWMutex
+	throttleMs       int = 0
+	throttleMu       sync.RWMutex
 
-	// Global encryption key for the session
-	transferKey   string
-	transferKeyMu sync.RWMutex
+	db   *storage.Database
+	dbMu sync.RWMutex
 
-	// Track received files for post-transfer verification
-	receivedFiles   = make(map[string]string) // Name -> Path
-	receivedFilesMu sync.Mutex
+	meshMessenger Messenger
+	meshMu        sync.RWMutex
+
+	// TelemetryCallback allows injecting a logger for transfer stats
+	TelemetryCallback func(transferID string, success bool, bytes int64, err string)
 )
 
-// TransferSession manages an active file transfer
+func SetTelemetryCallback(cb func(transferID string, success bool, bytes int64, err string)) {
+	TelemetryCallback = cb
+}
+
+func SetDB(d *storage.Database) {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	db = d
+}
+
+func getDB() *storage.Database {
+	dbMu.RLock()
+	defer dbMu.RUnlock()
+	return db
+}
+
+func SetMessenger(m Messenger) {
+	meshMu.Lock()
+	defer meshMu.Unlock()
+	meshMessenger = m
+}
+
+func getMessenger() Messenger {
+	meshMu.RLock()
+	defer meshMu.RUnlock()
+	return meshMessenger
+}
+
+func registerSession(session *TransferSession) {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	transferSessions[session.ID] = session
+}
+
+func unregisterSession(id string) {
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
+	delete(transferSessions, id)
+}
+
 type TransferSession struct {
-	ID                string
-	FilePath          string
-	DestIP            string
-	FileSize          int64
-	BytesTransferred  int64
-	LastUpdate        time.Time
-	Client            net.Conn
-	Cancelled         *C.int32_t // Flag in C-allocated memory
-	LastBytes         int64
-	LastUpdateTime    time.Time
-	StartOffset       int64
-	LastRotationBytes int64
-	mu                sync.Mutex
+	ID               string
+	FilePath         string
+	DestIP           string
+	FileSize         int64
+	BytesTransferred int64
+	LastUpdate       time.Time
+	Emitter          Emitter
+	StartOffset      int64
+	Direction        string
+	Cancelled        bool
+	CancelFlag       *int32
+	mu               sync.Mutex
 }
 
 func init() {
-	// Initialize receive directory in Downloads
-	home, _ := os.UserHomeDir()
-	receiveDir = filepath.Join(home, "Downloads", "HydraShare")
+	userHome, _ := os.UserHomeDir()
+	receiveDir = filepath.Join(userHome, "Downloads", "HydraShare")
 	os.MkdirAll(receiveDir, 0755)
 }
 
-// getAvailablePath returns a unique path by appending (1), (2), etc. if needed
-func getAvailablePath(basePath string) string {
-	if _, err := os.Stat(basePath); os.IsNotExist(err) {
-		return basePath
-	}
-
-	ext := filepath.Ext(basePath)
-	name := basePath[:len(basePath)-len(ext)]
-	counter := 1
-
-	for {
-		newPath := fmt.Sprintf("%s (%d)%s", name, counter, ext)
-		if _, err := os.Stat(newPath); os.IsNotExist(err) {
-			return newPath
-		}
-		counter++
-	}
-}
-
-// SetTransferKey sets the global encryption key for transfers
 func SetTransferKey(key string) {
 	transferKeyMu.Lock()
 	defer transferKeyMu.Unlock()
 	transferKey = key
-	fmt.Printf("🔐 Transfer Key Set: %s... (len=%d)\n", key[:5], len(key))
 }
 
-// GetTransferKey retrieves the current transfer key safely
 func GetTransferKey() string {
 	transferKeyMu.RLock()
-	defer transferKeyMu.RUnlock()
+	defer transferKeyMu.Unlock()
 	return transferKey
 }
 
-const (
-	rotationThreshold = 500 * 1024 * 1024 // Rotate key every 500MB
-)
-
-// Progress callback that Go exports to C
-//
-//export goProgressCallback
-func goProgressCallback(transferred C.int64_t, total C.int64_t, userData unsafe.Pointer) {
-	// Reconstruct the session from the handle
-	h := cgo.Handle(userData)
-	session := h.Value().(*TransferSession)
-
-	session.mu.Lock()
-	session.BytesTransferred = int64(transferred)
-	session.LastUpdate = time.Now()
-	session.mu.Unlock()
+func SetMaxFileSize(size int64) {
+	maxFileSizeMu.Lock()
+	defer maxFileSizeMu.Unlock()
+	maxFileSize = size
 }
 
-// GetFileInfo returns the file info for a given path
+func GetMaxFileSize() int64 {
+	maxFileSizeMu.RLock()
+	defer maxFileSizeMu.RUnlock()
+	return maxFileSize
+}
+
+func GetReceiveDir() string {
+	return receiveDir
+}
+
+func SetThrottle(ms int) {
+	throttleMu.Lock()
+	defer throttleMu.Unlock()
+	throttleMs = ms
+}
+
+func GetThrottle() int {
+	throttleMu.RLock()
+	defer throttleMu.RUnlock()
+	return throttleMs
+}
+
+// StartAdaptiveThrottler periodically checks network type and updates the global throttle
+func StartAdaptiveThrottler() {
+	ticker := time.NewTicker(10 * time.Second)
+	go func() {
+		for range ticker.C {
+			suggested := connectivity.GetBandwidthSuggestion()
+			current := GetThrottle()
+			if suggested != current {
+				log.Printf("⚖️ Adaptive Throttling: Network change detected. Updating throttle to %d ms", suggested)
+				SetThrottle(suggested)
+			}
+		}
+	}()
+}
+
 func GetFileInfo(filePath string) (os.FileInfo, error) {
 	return os.Stat(filePath)
 }
 
-// StartTransfer initiates a file transfer to a destination IP
-func StartTransfer(filePath, destIP string, uiConn net.Conn, ctrlConn net.Conn, startOffset int64) error {
-	// Validate file exists
-	fileInfo, err := os.Stat(filePath)
-	if err != nil {
-		return fmt.Errorf("file not found: %w", err)
-	}
-
-	key := GetTransferKey()
-	if key == "" {
-		return fmt.Errorf("encryption key not set")
-	}
-
-	fileSize := fileInfo.Size()
-	transferID := fmt.Sprintf("transfer_%d", time.Now().UnixNano())
-
-	// Create session with C-allocated cancellation flag
-	cancelPtr := (*C.int32_t)(C.malloc(C.size_t(unsafe.Sizeof(C.int32_t(0)))))
-	*cancelPtr = 0
-
-	session := &TransferSession{
-		ID:             transferID,
-		FilePath:       filePath,
-		DestIP:         destIP,
-		FileSize:       fileSize,
-		LastUpdate:     time.Now(),
-		Client:         uiConn,
-		Cancelled:      cancelPtr,
-		LastBytes:      0,
-		LastUpdateTime: time.Now(),
-		StartOffset:    startOffset,
-	}
-
-	sessionsMu.Lock()
-	transferSessions[transferID] = session
-	sessionsMu.Unlock()
-
-	// Start transfer in goroutine
-	go func() {
-		defer func() {
-			sessionsMu.Lock()
-			delete(transferSessions, transferID)
-			sessionsMu.Unlock()
-		}()
-
-		if err := performTransfer(session, key, ctrlConn, startOffset); err != nil {
-			sendTransferError(session, err)
-		} else {
-			sendTransferComplete(session)
+func CancelTransfer(transferID string) {
+	sessionsMu.RLock()
+	defer sessionsMu.RUnlock()
+	if session, ok := transferSessions[transferID]; ok {
+		session.mu.Lock()
+		session.Cancelled = true
+		if session.CancelFlag != nil {
+			*session.CancelFlag = 1 // Signal Rust to stop
 		}
-
-		// Cleanup C memory
-		C.free(unsafe.Pointer(session.Cancelled))
-	}()
-
-	// Send initial response
-	response := map[string]interface{}{
-		"type":        "TRANSFER_STARTED",
-		"transfer_id": transferID,
-		"file_size":   fileSize,
-		"file_name":   filepath.Base(filePath),
+		session.mu.Unlock()
+		log.Printf("🛑 Transfer cancelled: %s (%s)", transferID, session.FilePath)
 	}
-	encoder := json.NewEncoder(uiConn)
-	return encoder.Encode(response)
 }
 
-func performTransfer(session *TransferSession, key string, ctrlConn net.Conn, startOffset int64) error {
-	// Open source file
-	sourceFile, err := os.Open(session.FilePath)
+// Resume attempts to restart a transfer from its last known state
+func Resume(transferID string, database *storage.Database, emitter Emitter) error {
+	transfer, err := database.GetTransferByID(transferID)
 	if err != nil {
-		return fmt.Errorf("failed to open source file: %w", err)
+		return err
 	}
-	defer sourceFile.Close()
 
-	// Connect to destination
-	destConn, err := net.Dial("tcp", fmt.Sprintf("%s:5051", session.DestIP))
-	if err != nil {
-		return fmt.Errorf("failed to connect to destination: %w", err)
-	}
-	defer destConn.Close()
+	direction := transfer["direction"].(string)
+	peerIP := transfer["ip"].(string)
+	filePath := transfer["file"].(string)
 
-	// Get file descriptors
-	srcFd := int(sourceFile.Fd())
-
-	// For network socket, we need the underlying fd
-	destTCP, ok := destConn.(*net.TCPConn)
-	if !ok {
-		return fmt.Errorf("failed to cast connection to TCPConn")
-	}
-	destFile, err := destTCP.File()
-	if err != nil {
-		return fmt.Errorf("failed to get destination fd: %w", err)
-	}
-	defer destFile.Close()
-	destFd := int(destFile.Fd())
-
-	// Start progress updater
-	stopProgress := make(chan bool)
-	go progressUpdater(session, stopProgress)
-	defer close(stopProgress)
-
-	// Monitor session for key rotation
-	go func() {
-		for {
-			select {
-			case <-stopProgress:
-				return
-			case <-time.After(1 * time.Second):
-				session.mu.Lock()
-				// Delta-based rotation check
-				if session.BytesTransferred-session.LastRotationBytes >= rotationThreshold {
-					session.LastRotationBytes = session.BytesTransferred
-					fmt.Printf("🔄 Key Rotation Threshold reached for %s at %d bytes\n", session.ID, session.BytesTransferred)
-
-					// Send rotation signal direct to Peer's control plane
-					if ctrlConn != nil {
-						rotationMsg := map[string]interface{}{
-							"type":        "ROTATE_KEY_SIGNAL",
-							"transfer_id": session.ID,
-							"at_bytes":    session.BytesTransferred,
-						}
-						json.NewEncoder(ctrlConn).Encode(rotationMsg)
-					}
-				}
-				session.mu.Unlock()
-			}
+	if direction == "send" {
+		// Look for resumption token
+		_, offset, _, err := database.GetResumptionToken(transferID)
+		if err != nil {
+			offset = 0 // Start from beginning if token not found
 		}
-	}()
 
-	// Calculate Hash in Background to avoid blocking the transfer start
-	var fileHash string
-	hashDone := make(chan string, 1)
-	go func() {
-		h := sha256.New()
-		f, err := os.Open(session.FilePath)
-		if err == nil {
-			io.Copy(h, f)
-			f.Close()
-			hashDone <- hex.EncodeToString(h.Sum(nil))
-		} else {
-			hashDone <- ""
+		log.Printf("🚀 Resuming upload for %s from byte %d", filePath, offset)
+		return StartTransfer(filePath, peerIP, 5051, emitter, nil, offset)
+	}
+
+	if direction == "download" {
+		// For downloads, we need to tell the other side to start sending from offset
+		_, offset, _, err := database.GetResumptionToken(transferID)
+		if err != nil {
+			offset = 0
 		}
-	}()
 
-	// --- 1. Send Encrypted Header ---
-
-	header := struct {
-		FileName string `json:"file_name"`
-		FileSize int64  `json:"file_size"`
-		FileHash string `json:"file_hash,omitempty"` // Optional in first header
-	}{
-		FileName: filepath.Base(session.FilePath),
-		FileSize: session.FileSize,
-	}
-	hBytes, err := json.Marshal(header)
-	if err != nil {
-		return fmt.Errorf("failed to marshal header: %w", err)
-	}
-
-	// Encrypt Header
-	keyBytes, err := base64.StdEncoding.DecodeString(key)
-	if err != nil {
-		return fmt.Errorf("invalid key: %w", err)
-	}
-	block, err := aes.NewCipher(keyBytes)
-	if err != nil {
-		return fmt.Errorf("failed to create cipher: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return fmt.Errorf("failed to create GCM: %w", err)
-	}
-
-	hNonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, hNonce); err != nil {
-		return fmt.Errorf("failed to generate header nonce: %w", err)
-	}
-
-	hCipher := gcm.Seal(nil, hNonce, hBytes, nil)
-
-	// Write Header: [Nonce (12)] + [Len (4)] + [Ciphertext]
-	if _, err := destConn.Write(hNonce); err != nil {
-		return fmt.Errorf("failed to write header nonce: %w", err)
-	}
-
-	if err := binary.Write(destConn, binary.BigEndian, uint32(len(hCipher))); err != nil {
-		return fmt.Errorf("failed to write header length: %w", err)
-	}
-
-	if _, err := destConn.Write(hCipher); err != nil {
-		return fmt.Errorf("failed to write header cipher: %w", err)
-	}
-
-	// --- 2. Call Rust for Encrypted File Body (Rust sends FNonce + Chunks) ---
-	// Create a handle for the session to pass safely to C
-	h := cgo.NewHandle(session)
-	defer h.Delete()
-
-	// Convert key to C pointer
-	cKey := C.CBytes(keyBytes)
-	defer C.free(cKey)
-
-	// Call Rust transfer function
-	result := C.transfer_data(
-		C.intptr_t(srcFd),
-		C.intptr_t(destFd),
-		C.hydra_i64(session.FileSize),
-		C.hydra_i64(startOffset),
-		(*C.uint8_t)(cKey),
-		C.uintptr_t(len(keyBytes)),
-		session.Cancelled,
-		(C.progress_callback_t)(C.goProgressCallback),
-		unsafe.Pointer(h),
-	)
-
-	if result != C.SUCCESS {
-		return fmt.Errorf("transfer failed with code: %d", result)
-	}
-
-	// --- 3. Send Verification Hash (Post-Transfer) ---
-	fileHash = <-hashDone
-	if fileHash != "" && ctrlConn != nil {
-		fmt.Printf("🛡️  Sending verification hash for %s\n", session.ID)
-		verifyMsg := map[string]interface{}{
-			"type":        "VERIFY_HASH",
-			"transfer_id": session.ID,
-			"file_name":   filepath.Base(session.FilePath),
-			"hash":        fileHash,
+		log.Printf("🚀 Resuming download for %s from byte %d", filePath, offset)
+		if m := getMessenger(); m != nil {
+			// We need the IDs. For now, assume we use IDs for transferID tracking or look them up.
+			// Simplified: In direct P2P, we might just need to signal the peer at the IP.
+			// But the CoordinateG2GTransfer takes IDs.
+			// Ideally, transfers table should have stored sender/receiver IDs.
+			// For now, we reuse transferID as a fallback or assume it contains info.
+			m.CoordinateG2GTransfer("", "", filePath, transferID, offset)
 		}
-		json.NewEncoder(ctrlConn).Encode(verifyMsg)
-	}
-
-	// Also notify local UI that we are done on our side
-	if session.Client != nil {
-		completeMsg := map[string]interface{}{
-			"type":        "TRANSFER_COMPLETE",
-			"transfer_id": session.ID,
-			"file_name":   filepath.Base(session.FilePath),
-		}
-		json.NewEncoder(session.Client).Encode(completeMsg)
 	}
 
 	return nil
 }
 
-func progressUpdater(session *TransferSession, stopChan chan bool) {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-stopChan:
-			return
-		case <-ticker.C:
-			session.mu.Lock()
-			current := session.BytesTransferred
-			total := session.FileSize
-			session.mu.Unlock()
-
-			response := map[string]interface{}{
-				"type":        "TRANSFER_PROGRESS",
-				"transfer_id": session.ID,
-				"transferred": current,
-				"total":       total,
-			}
-			if session.Client != nil {
-				json.NewEncoder(session.Client).Encode(response)
-			}
+func getAvailablePath(basePath string) string {
+	if _, err := os.Stat(basePath); os.IsNotExist(err) {
+		return basePath
+	}
+	ext := filepath.Ext(basePath)
+	name := basePath[:len(basePath)-len(ext)]
+	for i := 1; ; i++ {
+		newPath := fmt.Sprintf("%s (%d)%s", name, i, ext)
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			return newPath
 		}
 	}
 }
 
+func VerifyReceivedFile(fileName, expectedHash string, emitter Emitter) {
+	fullPath := filepath.Join(GetReceiveDir(), fileName)
+	log.Printf("🛡️ Verifying %s against expected hash %s", fileName, expectedHash)
+
+	go func() {
+		actualHash, err := muscle.CalculateFileHash(fullPath)
+		if err != nil {
+			log.Printf("❌ Hash calculation failed for %s: %v", fileName, err)
+			return
+		}
+
+		actualHashHex := fmt.Sprintf("%x", actualHash)
+		status := "success"
+		if actualHashHex != expectedHash {
+			status = "failure"
+			log.Printf("⚠️ Hash mismatch for %s! Expected: %s, Actual: %s", fileName, expectedHash, actualHashHex)
+		} else {
+			log.Printf("✅ %s verified successfully", fileName)
+		}
+
+		if emitter != nil {
+			emitter.Emit(map[string]interface{}{
+				"type":        "VERIFICATION_RESULT",
+				"file_name":   fileName,
+				"status":      status,
+				"actual_hash": actualHashHex,
+			})
+		}
+	}()
+}
+
 func sendTransferComplete(session *TransferSession) {
-	response := map[string]interface{}{
-		"type":        "TRANSFER_COMPLETE",
-		"transfer_id": session.ID,
-		"status":      "success",
+	if session.Emitter != nil {
+		session.Emitter.Emit(map[string]interface{}{
+			"type":        "TRANSFER_COMPLETE",
+			"transfer_id": session.ID,
+			"file_name":   filepath.Base(session.FilePath),
+			"status":      "success",
+			"direction":   session.Direction,
+		})
 	}
-	if session.Client != nil {
-		json.NewEncoder(session.Client).Encode(response)
+	if TelemetryCallback != nil {
+		TelemetryCallback(session.ID, true, session.BytesTransferred, "")
 	}
 }
 
 func sendTransferError(session *TransferSession, err error) {
-	response := map[string]interface{}{
-		"type":        "TRANSFER_ERROR",
-		"transfer_id": session.ID,
-		"error":       err.Error(),
+	if session.Emitter != nil {
+		session.Emitter.Emit(map[string]interface{}{
+			"type":        "TRANSFER_ERROR",
+			"transfer_id": session.ID,
+			"error":       err.Error(),
+			"direction":   session.Direction,
+		})
 	}
-	if session.Client != nil {
-		json.NewEncoder(session.Client).Encode(response)
-	}
-}
-
-// CancelTransfer sets the cancellation flag for a given transfer ID
-func CancelTransfer(transferID string) {
-	sessionsMu.RLock()
-	session, ok := transferSessions[transferID]
-	sessionsMu.RUnlock()
-
-	if ok {
-		*session.Cancelled = 1
-	}
-}
-
-// StartReceiver starts the file receiving listener on port 5051
-func StartReceiver(eventsChan chan<- map[string]interface{}) {
-	ln, err := net.Listen("tcp", ":5051")
-	if err != nil {
-		fmt.Printf("❌ Failed to start receiver: %v\n", err)
-		return
-	}
-	defer ln.Close()
-
-	fmt.Println("📥 File receiver listening on :5051")
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			fmt.Printf("❌ Failed to accept receiver connection: %v\n", err)
-			continue
-		}
-
-		go handleIncomingTransfer(conn, eventsChan)
-	}
-}
-
-func handleIncomingTransfer(conn net.Conn, eventsChan chan<- map[string]interface{}) {
-	defer conn.Close()
-
-	key := GetTransferKey()
-	if key == "" {
-		fmt.Printf("❌ No encryption key set, cannot receive file.\n")
-		return
-	}
-	keyBytes, err := base64.StdEncoding.DecodeString(key)
-	if err != nil {
-		fmt.Printf("❌ Invalid key format: %v\n", err)
-		return
-	}
-
-	block, err := aes.NewCipher(keyBytes)
-	if err != nil {
-		fmt.Printf("❌ Failed to create cipher: %v\n", err)
-		return
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		fmt.Printf("❌ Failed to create GCM: %v\n", err)
-		return
-	}
-
-	// --- 1. Read Encrypted Header ---
-	// [Nonce (12)]
-	hNonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(conn, hNonce); err != nil {
-		fmt.Printf("❌ Failed to read header nonce: %v\n", err)
-		return
-	}
-
-	// [Len (4)]
-	var hLen uint32
-	if err := binary.Read(conn, binary.BigEndian, &hLen); err != nil {
-		fmt.Printf("❌ Failed to read header length: %v\n", err)
-		return
-	}
-
-	// [Ciphertext]
-	hCipher := make([]byte, hLen)
-	if _, err := io.ReadFull(conn, hCipher); err != nil {
-		fmt.Printf("❌ Failed to read header cipher: %v\n", err)
-		return
-	}
-
-	// Decrypt
-	hPlain, err := gcm.Open(nil, hNonce, hCipher, nil)
-	if err != nil {
-		fmt.Printf("❌ Failed to decrypt header: %v\n", err)
-		return
-	}
-
-	var header struct {
-		FileName string `json:"file_name"`
-		FileSize int64  `json:"file_size"`
-		FileHash string `json:"file_hash"`
-	}
-	if err := json.Unmarshal(hPlain, &header); err != nil {
-		fmt.Printf("❌ Failed to decode header JSON: %v\n", err)
-		return
-	}
-
-	// Sanitize file path
-	header.FileName = filepath.Base(header.FileName)
-	destPath := getAvailablePath(filepath.Join(receiveDir, header.FileName))
-	fmt.Printf("📥 Receiving file: %s (%d bytes) -> %s\n", header.FileName, header.FileSize, destPath)
-
-	// Check for resumption
-	var startOffset int64 = 0
-	if info, err := os.Stat(destPath); err == nil {
-		startOffset = info.Size()
-		fmt.Printf("🔄 Resuming from offset: %d\n", startOffset)
-	}
-
-	file, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		fmt.Printf("❌ Failed to open file: %v\n", err)
-		return
-	}
-	defer file.Close()
-
-	// Notify start
-	eventsChan <- map[string]interface{}{
-		"type":      "RECEIVE_STARTED",
-		"file_name": header.FileName,
-		"file_size": header.FileSize,
-	}
-
-	// --- 2. Read Encrypted File Body ---
-	// Rust sends: [FNonce (12)] then Loop: [CLen (4)][CChunk]
-
-	// Read FNonce
-	fNonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(conn, fNonce); err != nil {
-		fmt.Printf("❌ Failed to read file nonce: %v\n", err)
-		return
-	}
-
-	start := time.Now()
-	var totalTransferred int64 = 0
-
-	// Hasher for verification
-	hasher := sha256.New()
-
-	// Read Loop
-	// We reuse buffer. Max chunk size 1MB + overhead.
-	// Rust chunk is 1024*1024. Ciphertext is Chunk + 16 (Tag).
-	chunkBuf := make([]byte, 1024*1024+1024)
-
-	for {
-		var cLen uint32
-		err := binary.Read(conn, binary.BigEndian, &cLen)
-		if err == io.EOF {
-			break // Transfer complete
-		}
-		if err != nil {
-			fmt.Printf("❌ Failed to read chunk length: %v\n", err)
-			break
-		}
-
-		if int(cLen) > len(chunkBuf) {
-			// Resize if needed
-			chunkBuf = make([]byte, cLen+1024)
-		}
-
-		// Read Ciphertext Chunk
-		if _, err := io.ReadFull(conn, chunkBuf[:cLen]); err != nil {
-			fmt.Printf("❌ Failed to read chunk cipher: %v\n", err)
-			break
-		}
-
-		// Decrypt
-		plain, err := gcm.Open(nil, fNonce, chunkBuf[:cLen], nil)
-		if err != nil {
-			fmt.Printf("❌ Failed to decrypt chunk: %v\n", err)
-			break
-		}
-
-		// Write to File
-		if _, err := file.Write(plain); err != nil {
-			fmt.Printf("❌ Failed to write to file: %v\n", err)
-			break
-		}
-		// Write to Hasher
-		if _, err := hasher.Write(plain); err != nil {
-			fmt.Printf("❌ Failed to write to hasher: %v\n", err)
-			break
-		}
-		totalTransferred += int64(len(plain))
-	}
-
-	duration := time.Since(start)
-	if totalTransferred == header.FileSize {
-		// Verify Hash
-		receivedHash := hex.EncodeToString(hasher.Sum(nil))
-		if header.FileHash != "" {
-			if receivedHash == header.FileHash {
-				fmt.Printf("✅ Hash Verified: %s\n", receivedHash)
-			} else {
-				fmt.Printf("❌ Hash Mismatch! Expected: %s, Got: %s\n", header.FileHash, receivedHash)
-				// Rename to .corrupted
-				base := filepath.Base(destPath)
-				os.Rename(destPath, filepath.Join(receiveDir, base+".corrupted"))
-
-				eventsChan <- map[string]interface{}{
-					"type":      "TRANSFER_ERROR",
-					"file_name": header.FileName,
-					"error":     "Hash mismatch - file corrupted",
-				}
-				return
-			}
-		}
-
-		fmt.Printf("✅ Received %d bytes in %v for %s\n", totalTransferred, duration, header.FileName)
-
-		// Store path for post-transfer verification if hash is missing in header
-		if header.FileHash == "" {
-			receivedFilesMu.Lock()
-			receivedFiles[header.FileName] = destPath
-			receivedFilesMu.Unlock()
-
-			eventsChan <- map[string]interface{}{
-				"type":      "RECEIVE_PENDING_VERIFICATION",
-				"file_name": header.FileName,
-			}
-		} else {
-			eventsChan <- map[string]interface{}{
-				"type":      "RECEIVE_COMPLETE",
-				"file_name": header.FileName,
-				"path":      destPath,
-			}
-		}
-	}
-}
-
-// VerifyReceivedFile checks the hash of a recently received file and finalizes its status
-func VerifyReceivedFile(fileName, expectedHash string, eventsChan chan<- map[string]interface{}) {
-	receivedFilesMu.Lock()
-	path, ok := receivedFiles[fileName]
-	delete(receivedFiles, fileName)
-	receivedFilesMu.Unlock()
-
-	if !ok {
-		fmt.Printf("⚠️  Verification failed: No pending file found for %s\n", fileName)
-		return
-	}
-
-	// Calculate local hash again to ensure disk integrity
-	f, err := os.Open(path)
-	if err != nil {
-		fmt.Printf("❌ Failed to open file for verification: %v\n", err)
-		return
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	io.Copy(h, f)
-	actualHash := hex.EncodeToString(h.Sum(nil))
-
-	if actualHash == expectedHash {
-		fmt.Printf("✅ Post-transfer Hash Verified for %s\n", fileName)
-		eventsChan <- map[string]interface{}{
-			"type":      "RECEIVE_COMPLETE",
-			"file_name": fileName,
-			"path":      path,
-		}
-	} else {
-		fmt.Printf("❌ Post-transfer Hash Mismatch for %s\n", fileName)
-		base := filepath.Base(path)
-		os.Rename(path, filepath.Join(receiveDir, base+".corrupted"))
-
-		eventsChan <- map[string]interface{}{
-			"type":      "TRANSFER_ERROR",
-			"file_name": fileName,
-			"error":     "Post-transfer hash mismatch",
-		}
+	if TelemetryCallback != nil {
+		TelemetryCallback(session.ID, false, session.BytesTransferred, err.Error())
 	}
 }

@@ -4,41 +4,44 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"sync"
 	"time"
 )
 
+// Emitter defines a generic interface for sending events to the UI/Bridge
+type Emitter interface {
+	Emit(event interface{})
+}
+
 // Orchestrator manages mesh topology and G2G signaling
 type Orchestrator struct {
-	HostIP     string
-	Peers      map[string]*PeerState
-	PeersMu    sync.RWMutex
-	EventsChan chan<- map[string]interface{}
+	HostIP   string
+	Registry *PeerRegistry
+	Emitter  Emitter
 }
 
 // PeerState tracks a guest's connection and capabilities
 type PeerState struct {
-	ID         string
-	Name       string
-	Conn       net.Conn
-	PublicIP   string
-	LocalIPs   []string
-	Transports []string
-	PublicKey  string
+	ID           string
+	Name         string
+	Conn         net.Conn
+	PublicIP     string
+	LocalIPs     []string
+	Transports   []string
+	PublicKey    string
+	TransferPort int
 }
 
-func NewOrchestrator(hostIP string, eventsChan chan<- map[string]interface{}) *Orchestrator {
+func NewOrchestrator(hostIP string, registry *PeerRegistry, emitter Emitter) *Orchestrator {
 	return &Orchestrator{
-		HostIP:     hostIP,
-		Peers:      make(map[string]*PeerState),
-		EventsChan: eventsChan,
+		HostIP:   hostIP,
+		Registry: registry,
+		Emitter:  emitter,
 	}
 }
 
 // IntroducePeers sends discovery cards to all connected guests
 func (o *Orchestrator) IntroducePeers(newPeer *PeerState) {
-	o.PeersMu.RLock()
-	defer o.PeersMu.RUnlock()
+	peers := o.Registry.GetAllPeers()
 
 	// 1. Tell existing peers about the new peer
 	cardForExisting := DiscoveryCard{
@@ -50,7 +53,7 @@ func (o *Orchestrator) IntroducePeers(newPeer *PeerState) {
 		PublicKey:           newPeer.PublicKey,
 	}
 
-	for _, p := range o.Peers {
+	for _, p := range peers {
 		if p.ID == newPeer.ID {
 			continue
 		}
@@ -82,12 +85,12 @@ func (o *Orchestrator) MonitorThermalState() {
 		temp := o.getDeviceTemp()
 		if temp > 70 { // 70°C threshold
 			fmt.Printf("🔥 Thermal Warning: Device at %d°C. Requesting throttle.\n", temp)
-			if o.EventsChan != nil {
-				o.EventsChan <- map[string]interface{}{
+			if o.Emitter != nil {
+				o.Emitter.Emit(map[string]interface{}{
 					"type":       "THERMAL_THROTTLE",
 					"temp":       temp,
 					"suggestion": "lower_bandwidth",
-				}
+				})
 			}
 		}
 	}
@@ -98,8 +101,51 @@ func (o *Orchestrator) getDeviceTemp() int {
 	return 45 // Normal state
 }
 
+// CoordinateG2GTransfer tells Guest A and Guest B to connect to each other for a file transfer
+func (o *Orchestrator) CoordinateG2GTransfer(senderID, receiverID, fileName, transferID string, startOffset int64) error {
+	sender := o.Registry.GetPeer(senderID)
+	receiver := o.Registry.GetPeer(receiverID)
+
+	if sender == nil || receiver == nil {
+		return fmt.Errorf("one or both peers not found in mesh")
+	}
+
+	// Tell Receiver about Sender
+	introToReceiver := G2GTransferIntro{
+		Type:        "G2G_TRANSFER_INTRO",
+		TargetPeer:  sender.ID,
+		PeerName:    sender.Name,
+		PeerIPs:     sender.LocalIPs,
+		TransferID:  transferID,
+		FileName:    fileName,
+		IsSender:    false,
+		StartOffset: startOffset,
+	}
+
+	// Tell Sender about Receiver
+	introToSender := G2GTransferIntro{
+		Type:        "G2G_TRANSFER_INTRO",
+		TargetPeer:  receiver.ID,
+		PeerName:    receiver.Name,
+		PeerIPs:     receiver.LocalIPs,
+		TransferID:  transferID,
+		FileName:    fileName,
+		IsSender:    true,
+		StartOffset: startOffset,
+	}
+
+	// Send signals
+	if err := json.NewEncoder(receiver.Conn).Encode(introToReceiver); err != nil {
+		return fmt.Errorf("failed to signal receiver: %v", err)
+	}
+	if err := json.NewEncoder(sender.Conn).Encode(introToSender); err != nil {
+		return fmt.Errorf("failed to signal sender: %v", err)
+	}
+
+	fmt.Printf("📂 Coordinated G2G transfer: %s -> %s for '%s' (start: %d)\n", sender.Name, receiver.Name, fileName, startOffset)
+	return nil
+}
+
 func (o *Orchestrator) GetPeer(id string) *PeerState {
-	o.PeersMu.RLock()
-	defer o.PeersMu.RUnlock()
-	return o.Peers[id]
+	return o.Registry.GetPeer(id)
 }

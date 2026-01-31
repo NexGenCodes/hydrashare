@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../services/daemon_service.dart';
 import 'qr_handshake_screen.dart';
 import 'qr_scanner_screen.dart';
+import 'manual_pairing_screen.dart';
+import 'dart:io';
 
 class RoleSelectionScreen extends StatelessWidget {
   const RoleSelectionScreen({super.key});
@@ -41,7 +43,8 @@ class RoleSelectionScreen extends StatelessWidget {
                     Expanded(
                       child: _RoleCard(
                         title: 'Host Connection',
-                        subtitle: 'Generate a QR code and manage the network',
+                        subtitle:
+                            'Generate a PIN/QR code and manage the network',
                         icon: Icons.hub_rounded,
                         color: Colors.deepPurple,
                         onTap: () {
@@ -65,17 +68,31 @@ class RoleSelectionScreen extends StatelessWidget {
                     Expanded(
                       child: _RoleCard(
                         title: 'Guest Connection',
-                        subtitle: 'Scan a QR code to join an existing network',
-                        icon: Icons.qr_code_scanner_rounded,
+                        subtitle: 'Enter PIN or scan QR code to join',
+                        icon: Icons.login_rounded,
                         color: Colors.teal,
                         onTap: () {
                           DaemonService().setRole('guest');
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const QrScannerScreen(),
-                            ),
-                          );
+                          // On desktop, go directly to PIN entry
+                          if (Platform.isWindows ||
+                              Platform.isMacOS ||
+                              Platform.isLinux) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    const ManualPairingScreen(),
+                              ),
+                            );
+                          } else {
+                            // On mobile, go to scanner (which has PIN option)
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const QrScannerScreen(),
+                              ),
+                            );
+                          }
                         },
                       ),
                     ),

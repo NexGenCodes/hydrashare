@@ -1,44 +1,35 @@
-# Build script for HydraShare Daemon with Rust integration
-# This script builds the Rust library and then the Go daemon
+# HydraShare Daemon - Central Build Script
+# Usage: .\build.ps1 [-Windows] [-Android] [-All]
 
-Write-Host "🔨 Building HydraShare Daemon with Rust Integration..." -ForegroundColor Cyan
-Write-Host ""
+param (
+    [switch]$Android,
+    [switch]$Windows,
+    [switch]$All
+)
 
-# Step 1: Build Rust library
-Write-Host "📦 Building Rust library (hydra_muscle)..." -ForegroundColor Yellow
-Push-Location "$PSScriptRoot\..\hydra_muscle"
-cargo build --release
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Rust build failed!" -ForegroundColor Red
-    Pop-Location
-    exit 1
+$ScriptDir = $PSScriptRoot
+
+if ($All) {
+    Write-Host "`n=== BUILDING ALL PLATFORMS ===" -ForegroundColor Cyan
+    & "$ScriptDir\build_windows.ps1"
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+    & "$ScriptDir\build_android.ps1"
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+    Write-Host "`n=== ALL BUILDS COMPLETE ===" -ForegroundColor Green
+    exit 0
 }
-Pop-Location
-Write-Host "✅ Rust library built successfully" -ForegroundColor Green
-Write-Host ""
 
-# Step 2: Ensure bin directory and copy DLL
-Write-Host "📋 Preparing bin directory..." -ForegroundColor Yellow
-$binDir = Join-Path $PSScriptRoot "..\bin"
-if (!(Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir }
-Copy-Item "$PSScriptRoot\..\hydra_muscle\target\release\hydra_muscle.dll" -Destination $binDir -Force
-Write-Host "✅ DLL copied to bin/" -ForegroundColor Green
-Write-Host ""
-
-# Step 3: Build Go daemon with CGo enabled
-Write-Host "🔧 Building Go daemon with CGo..." -ForegroundColor Yellow
-$env:CGO_ENABLED = "1"
-$projectRoot = Resolve-Path "$PSScriptRoot\.."
-Push-Location $projectRoot
-go build -o bin\hydra_daemon.exe .\cmd\hydra_daemon
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "❌ Go build failed!" -ForegroundColor Red
-    Pop-Location
-    exit 1
+if ($Android) {
+    & "$ScriptDir\build_android.ps1"
+    exit $LASTEXITCODE
 }
-Pop-Location
-Write-Host "✅ Go daemon built successfully in bin/" -ForegroundColor Green
-Write-Host ""
 
-Write-Host "🎉 Build complete!" -ForegroundColor Cyan
-Write-Host "Run '.\bin\hydra_daemon.exe' to start the server" -ForegroundColor White
+if ($Windows) {
+    & "$ScriptDir\build_windows.ps1"
+    exit $LASTEXITCODE
+}
+
+# Default: Windows
+Write-Host "No platform specified. Defaulting to Windows build..." -ForegroundColor Yellow
+& "$ScriptDir\build_windows.ps1"
+exit $LASTEXITCODE

@@ -4,6 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/daemon_service.dart';
 import '../widgets/qr_scanner_overlay_shape.dart';
 import 'home_screen.dart';
+import 'manual_pairing_screen.dart';
 
 class QrScannerScreen extends StatefulWidget {
   const QrScannerScreen({super.key});
@@ -216,6 +217,40 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                 ),
               ),
             ),
+
+          // Manual Entry Button
+          Positioned(
+            bottom: 20,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: ElevatedButton.icon(
+                onPressed: _isConnecting
+                    ? null
+                    : () {
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ManualPairingScreen(),
+                          ),
+                        );
+                      },
+                icon: const Icon(Icons.dialpad),
+                label: const Text('Enter PIN Manually'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.deepPurple,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

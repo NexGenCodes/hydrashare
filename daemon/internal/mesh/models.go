@@ -38,3 +38,15 @@ type ResumptionToken struct {
 	PeerPublicKey  string    `json:"peer_public_key"`
 	ExpiresAt      time.Time `json:"expires_at"`
 }
+
+// G2GTransferIntro is used by the host to coordinate a direct transfer between two guests
+type G2GTransferIntro struct {
+	Type        string   `json:"type"`
+	TargetPeer  string   `json:"target_peer"`
+	PeerName    string   `json:"peer_name"`
+	PeerIPs     []string `json:"peer_ips"`
+	TransferID  string   `json:"transfer_id"`
+	FileName    string   `json:"file_name"`
+	IsSender    bool     `json:"is_sender"`
+	StartOffset int64    `json:"start_offset"`
+}

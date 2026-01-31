@@ -1,44 +1,104 @@
-$NDK = "C:\Users\USER\AppData\Local\Android\sdk\ndk\28.2.13676358"
-$TOOLCHAIN = "$NDK\toolchains\llvm\prebuilt\windows-x86_64\bin"
-$TARGET = "aarch64-linux-android34"
+# HydraShare Android Build Script
+# This script is strictly for cross-compiling the daemon for Android.
 
-# Set environment variables for Go cross-compilation
+$ErrorActionPreference = "Stop"
+$DAEMON_DIR = Resolve-Path "$PSScriptRoot\.."
+$RUST_DIR = "$DAEMON_DIR\hydra_muscle"
+$BIN_DIR = "$DAEMON_DIR\bin\android"
+
+function Write-Step ($msg) {
+    Write-Host "`n>> $msg" -ForegroundColor Cyan
+}
+
+function Write-Info ($msg) {
+    Write-Host "  [Info] $msg" -ForegroundColor Gray
+}
+
+function Write-Error-Custom ($msg) {
+    Write-Host "!! ERROR: $msg" -ForegroundColor Red
+}
+
+Write-Step "Preparing Android Build Environment..."
+
+# 1. Environment Setup
 $env:GOOS = "android"
 $env:GOARCH = "arm64"
 $env:CGO_ENABLED = "1"
-$env:CC = "$TOOLCHAIN\$TARGET-clang.cmd"
 
-# Output directory in Flutter project
-$OUT_DIR = "..\frontend\android\app\src\main\jniLibs\arm64-v8a"
-if (!(Test-Path $OUT_DIR)) {
-    New-Item -ItemType Directory -Force -Path $OUT_DIR
+# Locate Android NDK
+$NDK = $env:ANDROID_NDK_HOME
+if (!$NDK) {
+    $candidates = @(
+        "$env:LOCALAPPDATA\Android\Sdk\ndk\28.2.13676358",
+        "$env:LOCALAPPDATA\Android\Sdk\ndk-bundle"
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) { $NDK = $c; break }
+    }
 }
 
-Write-Host "Building Rust Hydra Muscle for Android (arm64-v8a)..."
-Push-Location .\hydra_muscle
-$env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "$TOOLCHAIN\$TARGET-clang.cmd"
-cargo build --target aarch64-linux-android --release
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Rust build failed!"
-    Pop-Location
-    exit $LASTEXITCODE
+if (!(Test-Path $NDK)) {
+    Write-Error-Custom "Android NDK not found. Please set ANDROID_NDK_HOME."
+    exit 1
 }
+Write-Info "Using NDK: $NDK"
+
+# Crucial for aws-lc-rs and other Rust crates
+$env:ANDROID_NDK = $NDK
+$env:ANDROID_NDK_HOME = $NDK
+$env:ANDROID_NDK_ROOT = $NDK
+
+$TOOLCHAIN = Join-Path $NDK "toolchains\llvm\prebuilt\windows-x86_64"
+$env:PATH = "$(Join-Path $TOOLCHAIN "bin");$env:PATH"
+
+# Force CMake to use a MinGW/Unix generator instead of Visual Studio
+$env:CMAKE_GENERATOR = "MinGW Makefiles"
+# Provide explicit NDK toolchain file to CMake
+$toolchainFile = "$($NDK.Replace('\', '/'))/build/cmake/android.toolchain.cmake"
+$env:CMAKE_TOOLCHAIN_FILE = $toolchainFile
+$env:ANDROID_ABI = "arm64-v8a"
+$env:ANDROID_PLATFORM = "android-35"
+
+# Ensure we use CMake from NDK or a known good one
+if (Test-Path "$NDK\prebuilt\windows-x86_64\bin\cmake.exe") {
+    $env:PATH = "$NDK\prebuilt\windows-x86_64\bin;$env:PATH"
+}
+
+# 2. Dependency Check
+Write-Step "Checking Dependencies..."
+if (!(Get-Command cargo -ErrorAction SilentlyContinue)) { Write-Error-Custom "Cargo not found"; exit 1 }
+if (!(Get-Command go -ErrorAction SilentlyContinue)) { Write-Error-Custom "Go not found"; exit 1 }
+
+# 3. Build Components
+Write-Step "Building Rust Library (aarch64-linux-android)..."
+$env:CC_aarch64_linux_android = Join-Path $TOOLCHAIN "bin\aarch64-linux-android35-clang.cmd"
+$env:CXX_aarch64_linux_android = Join-Path $TOOLCHAIN "bin\aarch64-linux-android35-clang++.cmd"
+$env:AR_aarch64_linux_android = Join-Path $TOOLCHAIN "bin\llvm-ar.exe"
+$env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = Join-Path $TOOLCHAIN "bin\aarch64-linux-android35-clang.cmd"
+
+Push-Location $RUST_DIR
+cargo build --target aarch64-linux-android
+if ($LASTEXITCODE -ne 0) { Write-Error-Custom "Rust build failed"; exit 1 }
 Pop-Location
 
-# Set library search path for CGO
-$MUSCLE_DIR = "$PWD\hydra_muscle\target\aarch64-linux-android\release"
-$env:CGO_LDFLAGS = "-L$MUSCLE_DIR -lhydra_muscle -llog"
-
-Write-Host "Building Go Daemon for Android (arm64-v8a)..."
-go build -buildmode=c-shared -o "$OUT_DIR\libhydra_daemon.so" ./cmd/hydra_daemon
-
-if ($LASTEXITCODE -eq 0) {
-    # Copy the Rust library too as it's a dependency
-    Copy-Item "$MUSCLE_DIR\libhydra_muscle.so" -Destination "$OUT_DIR\"
-    Write-Host "Successfully built libhydra_daemon.so and libhydra_muscle.so"
-    Write-Host "Location: $OUT_DIR"
+Write-Step "Building Go Daemon..."
+if (!(Test-Path $BIN_DIR)) { New-Item -ItemType Directory -Path $BIN_DIR }
+$libSrc = "$RUST_DIR\target\aarch64-linux-android\debug\libhydra_muscle.so"
+if (!(Test-Path $libSrc)) {
+    Write-Error-Custom "Rust .so not found at $libSrc"
+    exit 1
 }
-else {
-    Write-Host "Build failed!"
-    exit $LASTEXITCODE
-}
+Copy-Item $libSrc -Destination "$BIN_DIR\" -Force
+
+# Setup CGO
+$env:CC = Join-Path $TOOLCHAIN "bin\aarch64-linux-android35-clang.cmd"
+# CGo on Windows often prefers forward slashes for linker paths
+$cgoLibPath = $BIN_DIR.Replace('\', '/')
+$env:CGO_LDFLAGS = "-L$cgoLibPath -lhydra_muscle"
+
+Push-Location $DAEMON_DIR
+go build -o bin\android\hydra_daemon.so -buildmode=c-shared .\cmd\hydra_daemon
+if ($LASTEXITCODE -ne 0) { Write-Error-Custom "Go building failed"; exit 1 }
+Pop-Location
+
+Write-Host "`n✅ Android Build Successful! Artifacts in: $BIN_DIR" -ForegroundColor Green

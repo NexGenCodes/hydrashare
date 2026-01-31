@@ -71,6 +71,10 @@ func (d *Database) init() error {
 			supported_transports TEXT, -- JSON array
 			last_seen DATETIME
 		)`,
+		`CREATE TABLE IF NOT EXISTS config (
+			key TEXT PRIMARY KEY,
+			value TEXT
+		)`,
 	}
 
 	for _, q := range queries {
@@ -98,6 +102,47 @@ func (d *Database) SaveTransfer(transferID, fileName, peerIP, direction, status 
 		"INSERT INTO transfers (transfer_id, file_name, peer_ip, direction, status) VALUES (?, ?, ?, ?, ?)",
 		transferID, fileName, peerIP, direction, status,
 	)
+	return err
+}
+
+func (d *Database) GetPendingTransfers() ([]map[string]interface{}, error) {
+	rows, err := d.db.Query("SELECT transfer_id, file_name, peer_ip, direction FROM transfers WHERE status = 'pending'")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []map[string]interface{}
+	for rows.Next() {
+		var id, file, ip, dir string
+		rows.Scan(&id, &file, &ip, &dir)
+		results = append(results, map[string]interface{}{
+			"id":   id,
+			"file": file,
+			"ip":   ip,
+			"dir":  dir,
+		})
+	}
+	return results, nil
+}
+
+func (d *Database) GetTransferByID(transferID string) (map[string]interface{}, error) {
+	var file, ip, dir, status string
+	err := d.db.QueryRow("SELECT file_name, peer_ip, direction, status FROM transfers WHERE transfer_id = ?", transferID).Scan(&file, &ip, &dir, &status)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"id":        transferID,
+		"file":      file,
+		"ip":        ip,
+		"direction": dir,
+		"status":    status,
+	}, nil
+}
+
+func (d *Database) UpdateTransferStatus(transferID, status string) error {
+	_, err := d.db.Exec("UPDATE transfers SET status = ? WHERE transfer_id = ?", status, transferID)
 	return err
 }
 
@@ -129,6 +174,17 @@ func (d *Database) SaveResumptionToken(tokenID, filePath string, bytesCompleted,
 		"INSERT OR REPLACE INTO resumption_tokens (token_id, file_path, bytes_completed, total_size, peer_public_key, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
 		tokenID, filePath, bytesCompleted, totalSize, peerPubKey, expiresAt,
 	)
+	return err
+}
+
+func (d *Database) GetConfig(key string) (string, error) {
+	var val string
+	err := d.db.QueryRow("SELECT value FROM config WHERE key = ?", key).Scan(&val)
+	return val, err
+}
+
+func (d *Database) SaveConfig(key, value string) error {
+	_, err := d.db.Exec("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)", key, value)
 	return err
 }
 

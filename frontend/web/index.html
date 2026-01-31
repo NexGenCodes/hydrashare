@@ -1,4 +1,7 @@
-<!DOCTYPE html><html><head>
+<!DOCTYPE html>
+<html>
+
+<head>
   <!--
     If you are serving your web app in a path other than the root, change the
     href value below to reflect the base path you are serving from.
@@ -38,7 +41,7 @@
       margin: 0;
       min-height: 100%;
       background-color: #0A0E21;
-          background-size: 100% 100%;
+      background-size: 100% 100%;
     }
 
     .center {
@@ -51,19 +54,22 @@
     }
 
     .contain {
-      display:block;
-      width:100%; height:100%;
+      display: block;
+      width: 100%;
+      height: 100%;
       object-fit: contain;
     }
 
     .stretch {
-      display:block;
-      width:100%; height:100%;
+      display: block;
+      width: 100%;
+      height: 100%;
     }
 
     .cover {
-      display:block;
-      width:100%; height:100%;
+      display: block;
+      width: 100%;
+      height: 100%;
       object-fit: cover;
     }
 
@@ -96,13 +102,36 @@
   </script>
   <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport">
 </head>
+
 <body>
   <picture id="splash">
-      <source srcset="splash/img/light-1x.png 1x, splash/img/light-2x.png 2x, splash/img/light-3x.png 3x, splash/img/light-4x.png 4x" media="(prefers-color-scheme: light)">
-      <source srcset="splash/img/dark-1x.png 1x, splash/img/dark-2x.png 2x, splash/img/dark-3x.png 3x, splash/img/dark-4x.png 4x" media="(prefers-color-scheme: dark)">
-      <img class="center" aria-hidden="true" src="splash/img/light-1x.png" alt="">
+    <source
+      srcset="splash/img/light-1x.png 1x, splash/img/light-2x.png 2x, splash/img/light-3x.png 3x, splash/img/light-4x.png 4x"
+      media="(prefers-color-scheme: light)">
+    <source
+      srcset="splash/img/dark-1x.png 1x, splash/img/dark-2x.png 2x, splash/img/dark-3x.png 3x, splash/img/dark-4x.png 4x"
+      media="(prefers-color-scheme: dark)">
+    <img class="center" aria-hidden="true" src="splash/img/light-1x.png" alt="">
   </picture>
   <script src="flutter_bootstrap.js" async=""></script>
+  <script>
+    // Tauri v2 Bridge for HydraShare
+    if (window.__TAURI__) {
+      console.log("🔌 Tauri environment detected. Initializing daemon event bridge...");
+      const { listen } = window.__TAURI__.event;
 
+      listen('daemon-event', (event) => {
+        // Dispatch to window so Dart/JS interop can catch it
+        const customEvent = new CustomEvent('daemon-event', { detail: event.payload });
+        window.dispatchEvent(customEvent);
+      });
 
-</body></html>
+      // Helper for Dart to call invoke easily
+      window.hydraSend = (cmd, arg) => {
+        window.__TAURI__.core.invoke(cmd, { command: arg });
+      };
+    }
+  </script>
+</body>
+
+</html>

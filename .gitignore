@@ -3,14 +3,22 @@
 .idea/
 *.swp
 *.swo
+*.iml
 
 # OS & Temp
 .DS_Store
 Thumbs.db
+desktop.ini
 *~
 *.bak
 *.tmp
 *.log
+cargo_errors*.txt
+build_log.txt
+build_err*.txt
+build_panic.txt
+final_err.txt
+err.txt
 
 # Environment
 .env
@@ -18,18 +26,54 @@ Thumbs.db
 
 # Build Artifacts
 *.exe
+*.exe~
 *.dll
 *.so
 *.dylib
 *.bin
+*.a
+*.lib
+*.pdb
 bin/
 obj/
 dist/
 build/
+daemon/bin/
+daemon/daemon
+daemon/hydra_daemon
+daemon/cmd/hydra_daemon/*.exe
+daemon/cmd/hydra_daemon/*.dll
+daemon/cmd/hydra_daemon/*.so
+daemon/cmd/hydra_daemon/*.lib
+daemon/cmd/hydra_daemon/*.a
+daemon/cmd/hydra_daemon/*.h
+
+# Database
+*.db
+*.sqlite
+hydra_share.db
+daemon/*.db
 
 # Rust
 target/
+daemon/hydra_muscle/target/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins*
+.packages
+.pub-cache/
+.pub/
+frontend/build/
+frontend/.dart_tool/
+frontend/.flutter-plugins*
+frontend/pubspec.lock
+
+# Test Data
+testdata/
+daemon/testdata/
 
 # Agent
 .agent/
 .gemini/
+brain/

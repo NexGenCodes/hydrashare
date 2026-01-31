@@ -19,34 +19,44 @@ const (
 
 // Peer represents a discovered peer on the network
 type Peer struct {
-	IP   string
-	Name string
-	Port int
+	IP      string
+	Name    string
+	Port    int
+	PINHash string // PBKDF2 Hash of PIN
+	Salt    string // Random Salt used for hashing
 }
 
 // Service manages mDNS advertising and discovery
 type Service struct {
-	server    *mdns.Server
-	hostname  string
-	ctx       context.Context
-	cancel    context.CancelFunc
-	peersChan chan *Peer
+	server     *mdns.Server
+	hostname   string
+	targetPort int
+	pinHash    string
+	salt       string
+	ctx        context.Context
+	cancel     context.CancelFunc
+	peersChan  chan *Peer
 }
 
 // NewService creates a new discovery service
-func NewService() (*Service, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "hydra-unknown"
+func NewService(initialName string, initialPort int) (*Service, error) {
+	if initialName == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			initialName = "hydra-unknown"
+		} else {
+			initialName = hostname
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &Service{
-		hostname:  hostname,
-		ctx:       ctx,
-		cancel:    cancel,
-		peersChan: make(chan *Peer, 10),
+		hostname:   initialName,
+		targetPort: initialPort,
+		ctx:        ctx,
+		cancel:     cancel,
+		peersChan:  make(chan *Peer, 10),
 	}, nil
 }
 
@@ -64,9 +74,13 @@ func (s *Service) StartAdvertising() error {
 		ServiceName,
 		Domain,
 		"",
-		Port,
+		s.targetPort,
 		ips,
-		[]string{fmt.Sprintf("hostname=%s", s.hostname)},
+		[]string{
+			fmt.Sprintf("hostname=%s", s.hostname),
+			fmt.Sprintf("pin_hash=%s", s.pinHash),
+			fmt.Sprintf("salt=%s", s.salt),
+		},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create mDNS service: %w", err)
@@ -79,7 +93,7 @@ func (s *Service) StartAdvertising() error {
 	}
 
 	s.server = server
-	log.Printf("📡 mDNS advertising started as '%s' on port %d", s.hostname, Port)
+	log.Printf("📡 mDNS advertising started as '%s' on port %d (Salt: %s)", s.hostname, Port, s.salt)
 	return nil
 }
 
@@ -108,6 +122,14 @@ func (s *Service) discover() {
 					IP:   entry.AddrV4.String(),
 					Name: entry.Name,
 					Port: entry.Port,
+				}
+
+				for _, field := range entry.InfoFields {
+					if len(field) > 9 && field[:9] == "pin_hash=" {
+						peer.PINHash = field[9:]
+					} else if len(field) > 5 && field[:5] == "salt=" {
+						peer.Salt = field[5:]
+					}
 				}
 
 				// Use IPv6 if IPv4 is not available
@@ -162,9 +184,26 @@ func (s *Service) StopDiscovery() {
 	log.Println("🔍 Peer discovery stopped")
 }
 
-// UpdateName updates the advertised hostname and restarts advertising if active
 func (s *Service) UpdateName(newName string) {
 	s.hostname = newName
+	if s.server != nil {
+		s.StopAdvertising()
+		s.StartAdvertising()
+	}
+}
+
+func (s *Service) UpdatePIN(pinHash string, salt string) {
+	s.pinHash = pinHash
+	s.salt = salt
+	if s.server != nil {
+		s.StopAdvertising()
+		s.StartAdvertising()
+	}
+}
+
+// UpdatePort updates the advertised port and restarts server if needed
+func (s *Service) UpdatePort(port int) {
+	s.targetPort = port
 	if s.server != nil {
 		s.StopAdvertising()
 		s.StartAdvertising()

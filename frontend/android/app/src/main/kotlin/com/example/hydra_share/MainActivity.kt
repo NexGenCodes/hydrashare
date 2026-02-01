@@ -8,6 +8,8 @@ import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import com.example.hydra_share.WiFiDirectHandler
+import com.example.hydra_share.BluetoothHandler
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.hydrashare/p2p"
@@ -29,6 +31,14 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+
+        // Register WiFi-Direct Channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.hydrashare/wifi_direct")
+            .setMethodCallHandler(WiFiDirectHandler(this))
+
+        // Register Bluetooth Channel
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.hydrashare/bluetooth")
+            .setMethodCallHandler(BluetoothHandler(this))
     }
 
     private fun startDaemonService() {

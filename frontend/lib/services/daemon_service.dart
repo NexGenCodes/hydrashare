@@ -4,18 +4,18 @@ import 'dart:io' if (dart.library.html) 'dart:html';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import 'device_info_service.dart';
 import 'storage_service.dart';
+import 'rust_daemon_ffi.dart';
 
-/// Service class for managing persistent TCP connection to Go daemon
+/// Service class for managing the native Rust engine via FFI
 class DaemonService {
   static final DaemonService _instance = DaemonService._internal();
   factory DaemonService() => _instance;
   DaemonService._internal();
 
-  Socket? _socket;
-  String host = 'localhost';
-  int port = 5050;
   bool _isConnected = false;
 
   static const _p2pChannel = MethodChannel('com.example.hydrashare/p2p');
@@ -26,7 +26,6 @@ class DaemonService {
   final _connectedPeersController =
       StreamController<List<Map<String, dynamic>>>.broadcast();
   final List<Map<String, dynamic>> _connectedPeers = [];
-  Timer? _pingTimer;
 
   final _chatController = StreamController<Map<String, dynamic>>.broadcast();
   final _fileOfferController =
@@ -68,171 +67,130 @@ class DaemonService {
     _connectedPeersController.add([]);
   }
 
-  /// Connect to the Go daemon and start listening for responses
-  Future<void> connect({int retries = 20}) async {
+  /// Connect to the Rust engine via FFI and start listening for events
+  Future<void> connect({int retries = 5}) async {
     if (_isConnected) {
-      debugPrint('ℹ️ Already connected to Go daemon');
+      debugPrint('ℹ️ Already connected to Hydra Muscle engine');
       return;
     }
 
-    if (kIsWeb) {
-      // Web support removed for native desktop migration
-      return;
-    }
-
-    for (int i = 0; i < retries; i++) {
-      try {
-        debugPrint(
-          '🔌 Connecting to Go daemon at $host:$port (Attempt ${i + 1}/$retries)...',
-        );
-
-        _socket = await Socket.connect(
-          host,
-          port,
-          timeout: const Duration(seconds: 2),
-        );
-        _isConnected = true;
-
-        debugPrint('✅ Connected to Go daemon');
-        _startListening();
-        _startPing();
-
-        // Automatically register device name with daemon
-        final deviceName = await DeviceInfoService.getDeviceName();
-        await setDeviceName(deviceName);
-
-        // Sync existing peers (in case daemon was already running)
-        await sendCommand({'type': 'GET_PEERS'});
-
-        // Start native foreground service for background survival
-        if (Platform.isAndroid) {
-          try {
-            await _p2pChannel.invokeMethod('startForegroundService');
-            debugPrint('🛡️ Android Foreground Service Started');
-          } catch (e) {
-            debugPrint('⚠️ Failed to start foreground service: $e');
-          }
-        }
-
-        return; // Success!
-      } catch (e) {
-        debugPrint(
-          '⏳ Connection attempt ${i + 1} failed: $e. Retrying in 1s...',
-        );
-        await Future.delayed(const Duration(seconds: 1));
-      }
-    }
-
-    _isConnected = false;
-    throw Exception('Failed to connect to daemon after $retries attempts');
-  }
-
-  void _startListening() {
-    if (_socket == null) return;
-
-    _socket!.listen(
-      (List<int> data) {
-        final message = utf8.decode(data).trim();
-        // Handle multiple JSON objects in one packet (common in TCP)
-        final messages = message.split('\n');
-        for (var msg in messages) {
-          if (msg.isEmpty) continue;
-          try {
-            final response = jsonDecode(msg) as Map<String, dynamic>;
-            _responseController.add(response);
-
-            if (response['type'] == 'PEER_CONNECTED') {
-              _addConnectedPeer(response);
-            } else if (response['type'] == 'PEER_DISCONNECTED') {
-              _removeConnectedPeer(response);
-            } else if (response['type'] == 'WIFI_DIRECT_REQ') {
-              _handleWiFiDirectRequest();
-            } else if (response['type'] == 'PEER_DISCOVERED') {
-              // Discovery Radar update:handled by the stream, but we can log it
-              debugPrint(
-                '🔭 Peer discovered on network: ${response['name']} (${response['ip']})',
-              );
-            } else if (response['type'] == 'PEER_DISCOVERY_CARD') {
-              // G2G Mesh Introduction
-              debugPrint(
-                '🤝 Hub introduced us to new guest: ${response['name']}',
-              );
-              _handleMeshIntroduction(response);
-            } else if (response['type'] == 'RECEIVE_STARTED') {
-              debugPrint(
-                '📥 Incoming transfer started from: ${response['ip']}',
-              );
-              // This can trigger a global snackbar or notification in higher-level widgets
-            } else if (response['type'] == 'INCOMING_CHAT') {
-              final peerIp = response['ip'] ?? 'Broadcast';
-              StorageService().saveMessage(
-                peerIp: peerIp,
-                text: response['text'] ?? '',
-                isMe: false,
-              );
-              _chatController.add(response);
-              if (response['unread'] == true) {
-                _incrementUnread(response['ip']);
-              }
-            } else if (response['type'] == 'FILE_OFFER') {
-              final peerIp = response['ip'] ?? 'Broadcast';
-              StorageService().saveMessage(
-                peerIp: peerIp,
-                text: '📎 Incoming file: ${response['file_name']}',
-                isMe: false,
-                type: 'file_offer',
-                extra: {
-                  'file_name': response['file_name'],
-                  'offer_id': response['offer_id'],
-                },
-              );
-              _fileOfferController.add(response);
-            } else if (response['type'] == 'TRANSFER_REJECTED') {
-              debugPrint('❌ File transfer rejected by peer');
-            }
-          } catch (e) {
-            debugPrint('❌ Error parsing response: $e');
-          }
-        }
-      },
-      onError: (error) {
-        debugPrint('❌ Socket error: $error');
-        _isConnected = false;
-      },
-      onDone: () {
-        debugPrint('🔌 Connection closed');
-        _isConnected = false;
-      },
-    );
-  }
-
-  /// Send a command to the daemon
-  Future<void> sendCommand(Map<String, dynamic> command) async {
-    if (!_isConnected) {
-      throw Exception('Not connected to daemon');
-    }
+    if (kIsWeb) return;
 
     try {
-      final jsonString = jsonEncode(command);
-      debugPrint('📤 Sending to daemon: $jsonString');
+      debugPrint('🔌 Initializing Hydra Muscle engine via FFI...');
+      HydraMuscleFfi.init();
 
-      if (kIsWeb) {
-        // Web support removed
-        return;
-      } else {
-        if (_socket == null) throw Exception('Socket unavailable');
-        _socket!.write('$jsonString\n');
-        await _socket!.flush();
+      final appDir = await getApplicationDocumentsDirectory();
+      final dbPath = p.join(appDir.path, 'hydra.db');
+
+      final result = HydraMuscleFfi.startEngine(dbPath);
+      if (result != 0) {
+        throw Exception('Failed to start Rust engine: $result');
       }
+
+      _isConnected = true;
+      debugPrint('✅ Hydra Muscle engine started');
+
+      _startListening();
+      // _startPing(); // No longer needed with FFI
+
+      // Sync device name
+      final deviceName = await DeviceInfoService.getDeviceName();
+      await setDeviceName(deviceName);
+
+      // Start discovery by default
+      await startDiscovery();
+
+      return;
     } catch (e) {
-      debugPrint('❌ Failed to send command: $e');
+      debugPrint('❌ Failed to start engine: $e');
+      _isConnected = false;
       rethrow;
     }
   }
 
-  /// Send a ping command to test the connection
-  Future<void> ping() async {
-    await sendCommand({'type': 'ping'});
+  void _startListening() {
+    HydraMuscleFfi.events.listen(
+      (String eventJson) {
+        try {
+          final response = jsonDecode(eventJson) as Map<String, dynamic>;
+          _responseController.add(response);
+
+          if (response['type'] == 'PEER_CONNECTED') {
+            _addConnectedPeer(response);
+          } else if (response['type'] == 'PEER_DISCONNECTED') {
+            _removeConnectedPeer(response);
+          } else if (response['type'] == 'WIFI_DIRECT_REQ') {
+            _handleWiFiDirectRequest();
+          } else if (response['type'] == 'SESSION_CODE_GENERATED') {
+            debugPrint('🔗 Session Code Generated: ${response['code']}');
+          } else if (response['type'] == 'SIGNALING_STARTED') {
+            debugPrint('📡 MFR Signaling started for: ${response['id']}');
+          } else if (response['type'] == 'PEER_DISCOVERED') {
+            debugPrint(
+              '🔭 Peer discovered on network: ${response['name']} (${response['ip']})',
+            );
+          } else if (response['type'] == 'PEER_DISCOVERY_CARD') {
+            _handleMeshIntroduction(response);
+          } else if (response['type'] == 'RECEIVE_STARTED') {
+            debugPrint('📥 Incoming transfer started from: ${response['ip']}');
+          } else if (response['type'] == 'INCOMING_CHAT') {
+            final peerIp = response['ip'] ?? 'Broadcast';
+            StorageService().saveMessage(
+              peerIp: peerIp,
+              text: response['text'] ?? '',
+              isMe: false,
+            );
+            _chatController.add(response);
+            if (response['unread'] == true) {
+              _incrementUnread(response['ip']);
+            }
+          } else if (response['type'] == 'FILE_OFFER') {
+            final peerIp = response['ip'] ?? 'Broadcast';
+            StorageService().saveMessage(
+              peerIp: peerIp,
+              text: '📎 Incoming file: ${response['file_name']}',
+              isMe: false,
+              type: 'file_offer',
+              extra: {
+                'file_name': response['file_name'],
+                'offer_id': response['offer_id'],
+              },
+            );
+            _fileOfferController.add(response);
+          } else if (response['type'] == 'TRANSFER_REJECTED') {
+            debugPrint('❌ File transfer rejected by peer');
+          } else if (response['type'] == 'TRANSFER_PROGRESS') {
+            // Forward to response controller (handled by UI)
+          } else if (response['type'] == 'TRANSFER_COMPLETE') {
+            debugPrint('✅ Transfer complete: ${response['transfer_id']}');
+          }
+          // Add other event types as needed
+        } catch (e) {
+          debugPrint('❌ Error parsing FFI event: $e');
+        }
+      },
+      onError: (error) {
+        debugPrint('❌ FFI Event error: $error');
+      },
+    );
+  }
+
+  /// Send a command to the Rust engine
+  Future<void> sendCommand(Map<String, dynamic> command) async {
+    if (!_isConnected) {
+      throw Exception('Not connected to Hydra Muscle engine');
+    }
+
+    try {
+      final jsonString = jsonEncode(command);
+      debugPrint('📤 Sending command via FFI: $jsonString');
+
+      HydraMuscleFfi.sendCommand(jsonString);
+    } catch (e) {
+      debugPrint('❌ Failed to send command: $e');
+      rethrow;
+    }
   }
 
   /// Start discovering peers on the network
@@ -352,6 +310,66 @@ class DaemonService {
     }
   }
 
+  /// Generate a Long-Distance Transfer (LDT) session code
+  Future<String> generateSessionCode() async {
+    final completer = Completer<String>();
+
+    final subscription = responses.listen((response) {
+      if (response['type'] == 'SESSION_CODE_GENERATED') {
+        completer.complete(response['code'] as String);
+      } else if (response['type'] == 'ERROR') {
+        completer.completeError(response['error'] ?? 'Unknown error');
+      }
+    });
+
+    await sendCommand({'type': 'GENERATE_SESSION_CODE'});
+
+    try {
+      final code = await completer.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw TimeoutException('Session code generation timed out');
+        },
+      );
+      await subscription.cancel();
+      return code;
+    } catch (e) {
+      await subscription.cancel();
+      rethrow;
+    }
+  }
+
+  /// Join a session using an LDT session code (hydra://...)
+  Future<String> joinWithSessionCode(String code) async {
+    final completer = Completer<String>();
+
+    final subscription = responses.listen((response) {
+      if (response['type'] == 'PEER_CONNECTED') {
+        completer.complete('connected');
+      } else if (response['type'] == 'SIGNALING_STARTED') {
+        completer.complete('signaling');
+      } else if (response['type'] == 'ERROR') {
+        completer.completeError(response['error'] ?? 'Unknown error');
+      }
+    });
+
+    await sendCommand({'type': 'JOIN_SESSIONCODE', 'text': code});
+
+    try {
+      final status = await completer.future.timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          throw TimeoutException('Session joining timed out');
+        },
+      );
+      await subscription.cancel();
+      return status;
+    } catch (e) {
+      await subscription.cancel();
+      rethrow;
+    }
+  }
+
   /// Set local device name in daemon
   Future<void> setDeviceName(String name) async {
     await sendCommand({'type': 'SET_DEVICE_NAME', 'name': name});
@@ -422,14 +440,12 @@ class DaemonService {
 
   /// Close the connection to the daemon
   Future<void> disconnect() async {
-    debugPrint('🔌 Disconnecting from daemon...');
+    debugPrint('🔌 Stopping Hydra Muscle engine...');
 
-    await _socket?.close();
-    _socket = null;
+    HydraMuscleFfi.stopEngine();
     _isConnected = false;
-    _pingTimer?.cancel();
 
-    debugPrint('✅ Disconnected');
+    debugPrint('✅ Engine stopped');
   }
 
   /// Mark messages from a peer as read
@@ -506,7 +522,7 @@ class DaemonService {
     _chatController.close();
     _fileOfferController.close();
     _warningController.close();
-    _socket?.destroy();
+    HydraMuscleFfi.stopEngine();
   }
 
   Future<void> _handleWiFiDirectRequest() async {
@@ -542,19 +558,6 @@ class DaemonService {
       'type': 'REJECT_FILE',
       'offer_id': offerId,
       'dest_ip': destIp,
-    });
-  }
-
-  void _startPing() {
-    _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
-      if (_isConnected) {
-        ping().catchError((e) {
-          debugPrint('📡 Keep-alive ping failed: $e');
-        });
-      } else {
-        timer.cancel();
-      }
     });
   }
 

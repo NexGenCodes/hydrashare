@@ -85,6 +85,30 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
   Future<void> _handleCode(String code) async {
     try {
+      if (code.startsWith('hydra://')) {
+        debugPrint('🔗 Detected Session Code: $code');
+        final status = await _daemonService.joinWithSessionCode(code);
+        if (mounted) {
+          if (status == 'connected') {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => HomeScreen(daemonService: _daemonService),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  '📡 MFR Signaling started... Waiting for remote peer.',
+                ),
+              ),
+            );
+          }
+        }
+        return;
+      }
+
       // Parse the code: format is "ip|key"
       final parts = code.split('|');
       final targetIp = parts[0];

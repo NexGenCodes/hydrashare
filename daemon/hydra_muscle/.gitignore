@@ -1,5 +1,4 @@
 /target
-cargo_errors*.txt
 *.rs.bk
 *.h
 *.so
@@ -7,3 +6,7 @@ cargo_errors*.txt
 *.dll
 *.lib
 *.exe
+
+# Build/debug error logs
+*.txt
+!README.txt

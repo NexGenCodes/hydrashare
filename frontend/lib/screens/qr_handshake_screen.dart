@@ -18,6 +18,7 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
   String? _generatedKey;
   String? _displayPin;
   bool _isGenerating = false;
+  bool _isRemoteMode = false;
   late StreamSubscription _connectionSubscription;
 
   @override
@@ -66,20 +67,29 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
         await widget.daemonService.connect();
       }
 
-      final result = await widget.daemonService.generateCodeWithIP();
-      setState(() {
-        final ip = result['ip'];
-        final key = result['key'];
-        final pin = result['pin'];
+      if (_isRemoteMode) {
+        final code = await widget.daemonService.generateSessionCode();
+        setState(() {
+          _generatedKey = code;
+          _displayPin = null; // Session codes are long URLs
+          _isGenerating = false;
+        });
+      } else {
+        final result = await widget.daemonService.generateCodeWithIP();
+        setState(() {
+          final ip = result['ip'];
+          final key = result['key'];
+          final pin = result['pin'];
 
-        // QR Code = IP|KEY (for secure scanning)
-        _generatedKey = '$ip|$key';
+          // QR Code = IP|KEY (for secure scanning)
+          _generatedKey = '$ip|$key';
 
-        // Display PIN = PIN (for manual entry)
-        _displayPin = pin;
+          // Display PIN = PIN (for manual entry)
+          _displayPin = pin;
 
-        _isGenerating = false;
-      });
+          _isGenerating = false;
+        });
+      }
     } catch (e) {
       setState(() {
         _isGenerating = false;
@@ -143,8 +153,49 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Ask the receiver to scan this code',
-                      style: TextStyle(fontSize: 16, color: Colors.black54),
+                      _isRemoteMode
+                          ? 'Share session code via QR'
+                          : 'Ask the receiver to scan this code',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: Colors.black54,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Toggle Mode Button
+                    OutlinedButton.icon(
+                      onPressed: _isGenerating
+                          ? null
+                          : () {
+                              setState(() {
+                                _isRemoteMode = !_isRemoteMode;
+                                _generateCode();
+                              });
+                            },
+                      icon: Icon(
+                        _isRemoteMode
+                            ? Icons.language_rounded
+                            : Icons.home_rounded,
+                        size: 20,
+                      ),
+                      label: Text(
+                        _isRemoteMode
+                            ? 'Switch to Local Mode'
+                            : 'Switch to Remote Mode',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _isRemoteMode
+                            ? Colors.green
+                            : Colors.deepPurple,
+                        side: BorderSide(
+                          color: _isRemoteMode
+                              ? Colors.green
+                              : Colors.deepPurple,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
                     ),
                   ],
                 ),

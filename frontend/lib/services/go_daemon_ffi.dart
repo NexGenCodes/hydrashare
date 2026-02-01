@@ -26,6 +26,11 @@ class GoDaemonFfi {
       } catch (e) {
         debugPrint('❌ Failed to load libraries: $e');
       }
+    } else if (Platform.isIOS) {
+      // On iOS, static libraries are linked into the main process
+      _lib = DynamicLibrary.process();
+      _isInitialized = true;
+      debugPrint('✅ Loaded Go Daemon via static linking (iOS)');
     }
   }
 

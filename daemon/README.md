@@ -1,68 +1,57 @@
-# HydraShare Daemon
+# HydraShare Engine (Rust)
 
-High-performance file transfer daemon for the HydraShare project, powered by Go and a Rust core (`hydra_muscle`).
+High-performance file transfer engine for the HydraShare project, powered by Rust (`hydra_muscle`).
 
 ## Structure
 
-- `cmd/hydra_daemon`: Entry point and JSON command handler.
-- `internal/transfer`: Core transfer management logic and CGo bindings.
-- `hydra_muscle`: Rust implementation of platform-specific fast I/O (sendfile/TransmitFile).
-- `scripts`: Automation and testing scripts.
-- `bin`: Compiled binaries and libraries.
-- `testdata`: Local test files.
+- **hydra_muscle**: Main Rust library implementing:
+  - `auth`: 6-digit PIN pairing with PBKDF2-HMAC-SHA256.
+  - `core`: Engine lifecycle and thread-safe state management.
+  - `db`: Persistence layer using SQLite (via `rusqlite`).
+  - `discovery`: mDNS-based local network peer discovery.
+  - `mesh`: P2P signaling, heartbeats, and G2G orchestration.
+  - `quic`: Encrypted high-speed data plane using `quinn`.
+  - `ffi`: JSON-based command API for Flutter integration.
+
+- **bin**: Compiled artifacts (libraries and standalone test binaries).
 
 ## Getting Started
 
 ### Prerequisites
 
-- Go 1.25+
-- Rust (Cargo)
-- C Compiler (GCC/MSVC)
+- Rust (Latest stable)
+- C Compiler (MSVC on Windows, GCC/Clang elsewhere)
 
 ### Building
 
-Use the provided build scripts:
-
-```powershell
-# Windows (PowerShell)
-.\scripts\build.ps1              # Windows only (default)
-.\scripts\build.ps1 -Android     # Android only
-.\scripts\build.ps1 -All         # Both platforms
-```
+Use the scripts in the project root's `scripts/` directory, or compile directly with Cargo:
 
 ```bash
-# Linux/macOS
-./scripts/build.sh               # Host only (default)
-./scripts/build.sh --android     # Android only
-./scripts/build.sh --all         # Both platforms
+cd hydra_muscle
+cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-This will compile the Rust core (`ring` crypto backend) and the Go daemon into the `bin/` directory.
+### Standalone Daemon
 
-### Running Tests
+You can run a standalone test daemon if needed:
 
-1. **Start the Daemon**:
+```bash
+cargo run --bin hydra_daemon
+```
 
-    ```powershell
-    .\bin\hydra_daemon.exe
-    ```
+## FFI API Commands
 
-2. **Start the Receiver** (in another terminal):
+The engine receives JSON commands via the `send_command` FFI function:
 
-    ```powershell
-    .\scripts\test_receive.ps1
-    ```
+- `INIT`: `{"type": "INIT", "data_dir": "..."}`
+- `START_ENGINE`: `{"type": "START_ENGINE"}`
+- `GENERATE_CREDENTIALS`: `{"type": "GENERATE_CREDENTIALS"}`
+- `SEND_FILE`: `{"type": "SEND_FILE", "file_path": "...", "dest_ip": "..."}`
 
-3. **Trigger a Transfer**:
+## Security
 
-    ```powershell
-    .\scripts\test_trigger.ps1
-    ```
+HydraShare uses a zero-config security model:
 
-## API Commands
-
-The daemon listens on `localhost:5050` for JSON commands:
-
-- `START_TRANSFER`: `{"type": "START_TRANSFER", "file_path": "...", "dest_ip": "..."}`
-- `CANCEL_TRANSFER`: `{"type": "CANCEL_TRANSFER", "transfer_id": "..."}`
-- `ping`: `{"type": "ping"}`
+1. **Identity**: Each device generates a persistent Ed25519 keypair.
+2. **Channel**: All communication is encrypted via TLS 1.3 (QUIC default).
+3. **Pairing**: Out-of-band PIN verification prevents MITM during initial introduction.

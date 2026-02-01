@@ -39,14 +39,6 @@ obj/
 dist/
 build/
 daemon/bin/
-daemon/daemon
-daemon/hydra_daemon
-daemon/cmd/hydra_daemon/*.exe
-daemon/cmd/hydra_daemon/*.dll
-daemon/cmd/hydra_daemon/*.so
-daemon/cmd/hydra_daemon/*.lib
-daemon/cmd/hydra_daemon/*.a
-daemon/cmd/hydra_daemon/*.h
 
 # Database
 *.db

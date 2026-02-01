@@ -8,42 +8,36 @@ HydraShare is a modern peer-to-peer file sharing application that enables seamle
 
 ### 🔐 Security
 
-- **End-to-End Encryption**: AES-256-GCM encryption for all file transfers
+- **End-to-End Encryption**: AES-256-GCM encryption for all file transfers via Rust `ring` backend
 - **QR Code Handshake**: Secure peer discovery and key exchange via QR codes
+- **PIN-Based Pairing**: Secure PBKDF2-HMAC authenticated pairing mechanism
 - **File Validation**: Real-time SHA-256 streaming hash verification for data integrity
-- **Proximity-Based Auto-Disconnect**: Automatic disconnection when devices move apart
-- **Atomic Cancellation**: Instant, thread-safe transfer cancellation via atomic signaling
+- **Atomic Cancellation**: Instant, thread-safe transfer cancellation via Rust atomic signaling
 
 ### ⚡ Performance
 
-- **Zero-Copy I/O**: Platform-optimized file transfers using Rust
+- **Pure Rust Engine**: High-performance, memory-safe data plane and control plane
+- **QUIC Transport**: Low-latency, encrypted streams using the `quinn` implementation
+- **Zero-Copy I/O**: Platform-optimized file transfers
 - **Adaptive Throttling**: Intelligent bandwidth management based on network conditions
 - **Resumable Transfers**: Persistent queue with automatic resumption from byte offsets
-- **Multi-Hop Relay**: Mesh networking for extended range through relay nodes
 
 ### 🎯 User Experience
 
 - **Cross-Platform**: Supports Android, Windows, Linux, and macOS
 - **Modern UI**: Beautiful Flutter-based interface with dark mode support
 - **Real-Time Chat**: Instant messaging between connected peers
-- **Wake Lock**: Prevents screen dimming during active transfers
 - **Transfer Notifications**: Real-time progress updates and completion alerts
 
 ### 🌐 Networking
 
 - **mDNS Discovery**: Automatic peer discovery on local networks
-- **Hybrid Transport**: Supports both QUIC/UDP (performance) and TCP (fallback)
-- **Mesh Networking**: Guest-to-Guest direct connections via host relay
-- **Multiple Transports**: Wi-Fi, Bluetooth, and USB RNDIS support
+- **QUIC-Only Protocol**: Single, unified protocol for handshakes, chat, and files
+- **IPv6 Ready**: Full dual-stack support for modern network environments
 
 ## 🏗️ Architecture
 
-HydraShare uses a hybrid architecture combining the strengths of multiple technologies:
-
-![HydraShare Architecture](docs/architecture_diagram.png)
-
-<details>
-<summary>Mermaid Source</summary>
+HydraShare uses a streamlined architecture focusing on performance and safety:
 
 ```mermaid
 graph TD
@@ -54,71 +48,53 @@ graph TD
         DM[Device Management]
     end
 
-    subgraph Backend ["Go Daemon (Business Logic)"]
+    subgraph Backend ["Rust Engine (hydra_muscle)"]
         disc[mDNS Peer Discovery]
         sec[Encryption & Key Management]
         coord[Transfer Coordination]
         mesh[Mesh Orchestration]
         db[(SQLite Database)]
+        ffi[FFI Command API]
     end
 
-    subgraph Core ["Rust Core (I/O Performance)"]
-        mod[Modular Engine: common, hash, tcp, quic]
-        atom[Atomic Cancellation & Flow Control]
-        hsh[Streaming SHA-256 Hashing]
-    end
-
-    UI -->|FFI Bridge| disc
-    DM -->|FFI Bridge| db
-    coord -->|CGo| mod
-    sec -->|CGo| atom
-    hsh -->|Verify| db
+    UI -->|JSON Commands| ffi
+    ffi --> disc
+    ffi --> db
+    ffi --> coord
+    coord --> sec
 ```
-
-</details>
 
 ### Technology Stack
 
 - **Frontend**: Flutter 3.10+ (Dart)
-- **Backend**: Go 1.25+ (Logic, Networking, & SQLite)
-- **I/O Core**: Modular Rust (Encrypted Streaming & QUIC)
-- **Database**: SQLite (Message & Queue Persistence)
-- **Discovery**: mDNS (Hashicorp mdns)
-- **Encryption**: AES-256-GCM
+- **Backend**: Pure Rust (Networking, Logic, & Persistence)
+- **Database**: SQLite (via `rusqlite` with WAL)
+- **Discovery**: mDNS (`mdns-sd`)
+- **Encryption**: AES-256-GCM (`ring`)
+- **Transport**: QUIC (`quinn`)
 
 ## 📦 Project Structure
 
 ```
 hydrashare/
-├── daemon/                 # Go backend daemon
-│   ├── cmd/
-│   │   └── hydra_daemon/  # Main daemon entry point
-│   ├── internal/          # Internal modular packages
-│   │   ├── connectivity/  # Network & Throttling
-│   │   ├── discovery/     # mDNS peer discovery
-│   │   ├── mesh/          # Mesh & Orchestration
-│   │   ├── storage/       # SQLite & Queueing
-│   │   └── transfer/      # Session & Data Flow
-│   ├── hydra_muscle/      # Modular Rust I/O core
+├── daemon/                 # Rust backend engine
+│   ├── hydra_muscle/      # Main logic crate
 │   │   ├── src/
-│   │   │   ├── common.rs  # Shared types & errors
-│   │   │   ├── hash.rs    # Hashing logic
-│   │   │   ├── tcp.rs     # Encrypted TCP data plane
-│   │   │   ├── quic.rs    # QUIC transport
-│   │   │   └── lib.rs     # FFI Gateway
+│   │   │   ├── auth/      # PIN & Session security
+│   │   │   ├── core/      # Engine state & Lifecycle
+│   │   │   ├── db/        # SQLite persistence
+│   │   │   ├── mesh/      # P2P Orchestration
+│   │   │   ├── quic/      # High-speed transport
+│   │   │   └── ffi/       # Flutter bridge
 │   │   └── Cargo.toml
-│   └── scripts/           # Build automation
+│   └── bin/               # Compiled artifacts
 │
 ├── frontend/              # Flutter mobile/desktop app
-│   ├── lib/
-│   │   ├── screens/       # UI screens
-│   │   ├── services/      # Daemon & Notify services
-│   │   └── widgets/       # UI components
-│   └── android/           # Android JNI/FFI setup
+│   └── lib/
+│       ├── services/      # Rust FFI bridge services
+│       └── screens/       # UI implementations
 │
-└── README.md              # Project documentation
-```
-
+└── scripts/               # Unified build automation
 ```
 
 ## 🚀 Getting Started
@@ -127,19 +103,14 @@ hydrashare/
 
 #### For Development
 
-- **Go**: 1.25 or higher
 - **Rust**: Latest stable (via rustup)
 - **Flutter**: 3.10 or higher
-- **C Compiler**:
-  - Windows: MSVC (Visual Studio Build Tools)
-  - Linux: GCC
-  - macOS: Clang (Xcode Command Line Tools)
-
-#### For Android Development
-
 - **Android SDK**: API Level 21+ (Android 5.0+)
 - **NDK**: r25 or higher
-- **Java**: JDK 17+
+- **C Compiler**:
+  - Windows: MSVC (Visual Studio Build Tools) or GCC (Strawberry)
+  - Linux: GCC
+  - macOS: Clang (Xcode Command Line Tools)
 
 ### Installation
 
@@ -150,60 +121,46 @@ hydrashare/
    cd hydrashare
    ```
 
-1. **Build the Rust core**
+2. **Build the Engine**
 
-   ```bash
-   cd daemon/hydra_muscle
-   cargo build --release
-   cd ../..
-   ```
+   Use the unified build scripts provided in the `scripts/` directory:
 
-2. **Build the Go daemon**
-
-   **Windows:**
+   **Windows (PowerShell):**
 
    ```powershell
-   cd daemon
-   .\scripts\build.ps1
+   .\scripts\build_windows.ps1
    ```
 
-   **Linux/macOS:**
+   **Android:**
 
-   ```bash
-   cd daemon
-   ./scripts/build.sh
+   ```powershell
+   .\scripts\build_android.ps1
    ```
 
-3. **Build the Flutter app**
+3. **Build the Flutter App**
 
    ```bash
    cd frontend
    flutter pub get
-   flutter build apk  # For Android
+   flutter build apk      # For Android
    flutter build windows  # For Windows
    ```
 
 ### Running the Application
 
-#### Desktop (Windows/Linux/macOS)
+#### Desktop (Windows)
 
-1. Start the daemon:
-
-   ```bash
-   ./daemon/bin/hydra_daemon
-   ```
-
+1. Run the build script to ensure all artifacts are in `daemon/bin`.
 2. Run the Flutter app:
 
    ```bash
    cd frontend
-   flutter run -d windows  # or linux/macos
+   flutter run -d windows
    ```
 
 #### Android
 
-1. Connect your Android device or start an emulator
-
+1. Connect your Android device.
 2. Build and run:
 
    ```bash
@@ -211,49 +168,30 @@ hydrashare/
    flutter run
    ```
 
-The daemon will be automatically embedded and started via FFI.
-
 ## 📱 How to Use
 
-### Host Mode (File Sender)
-
-1. **Launch the app** and select **"Host"** role
-2. **Generate QR Code** - The app will create a secure QR code containing:
-   - Your device IP address
-   - AES-256 encryption key
-   - Device name
-3. **Wait for guests** to scan your QR code
-4. **Select files** to share and send to connected guests
-5. **Monitor transfers** in real-time with progress indicators
-
-### Guest Mode (File Receiver)
-
-1. **Launch the app** and select **"Guest"** role
-2. **Scan QR Code** from the host device
-3. **Automatic connection** - Secure handshake and encryption setup
-4. **Receive files** - Accept or reject incoming file offers
-5. **Chat with host** and other guests in the mesh network
-
-### Features Available in Both Modes
-
-- **Real-time chat** with connected peers
-- **File transfer management** with pause/resume
-- **Connection status** monitoring
-- **Transfer history** and message logs
-- **Low power mode** toggle for battery saving
+1. **Permission**: Grant storage and network permissions.
+2. **Pairing**: Use **Generate Credentials** on one device and enter the PIN on the other, or use the QR code.
+3. **Transfer**: Select files and choose the destination peer.
+4. **Chat**: Message peers directly during an active session.
 
 ## 🧪 Testing
 
 ### Unit Tests
 
 ```bash
-# Test Go daemon
-cd daemon
-go test ./...
-
 # Test Rust core
-cd hydra_muscle
+cd daemon/hydra_muscle
 cargo test
+```
+
+### Integration Tests
+
+Integration testing is handled through the FFI layer. Ensure the daemon builds successfully, then run the Flutter integration tests:
+
+```bash
+cd frontend
+flutter test integration_test/app_test.dart
 ```
 
 ### Integration Tests
@@ -276,52 +214,15 @@ cd daemon/scripts
 
 ### Daemon Ports
 
-- **5050**: Flutter client connection (TCP)
-- **5051**: File transfer port (TCP)
-- **5052**: Secure handshake listener (TCP)
-- **5353**: mDNS discovery (UDP)
+- **5051**: Peer Discovery (mDNS)
+- **5053**: Mesh signaling and incoming transfers (QUIC)
 
 ### Security Settings
 
-- **Encryption**: AES-256-CBC (hardcoded, cannot be disabled)
+- **Encryption**: AES-256-GCM (Permanent)
 - **Hash Algorithm**: SHA-256 for file verification
-- **Max File Size**: 2GB (configurable in code)
-- **Key Rotation**: Per-session (new key for each host session)
-
-### Performance Tuning
-
-Edit `daemon/internal/transfer/manager.go`:
-
-- `BufferSize`: Adjust transfer buffer (default: 64KB)
-- `ChunkSize`: Modify progress update frequency
-- `MaxConcurrentTransfers`: Limit simultaneous transfers
-
-## 🛠️ Development
-
-### Building for Android
-
-```bash
-cd daemon
-# Build for Android ARM64
-GOOS=android GOARCH=arm64 CGO_ENABLED=1 \
-  CC=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
-  go build -buildmode=c-shared -o ../frontend/android/app/src/main/jniLibs/arm64-v8a/libhydra_daemon.so \
-  ./cmd/hydra_daemon
-```
-
-### Code Style
-
-- **Go**: Follow standard Go conventions (`gofmt`, `golint`)
-- **Dart**: Use `flutter format` and `dart analyze`
-- **Rust**: Use `cargo fmt` and `cargo clippy`
-
-### Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- **Pairing**: PBKDF2-HMAC-SHA256 (100k iterations)
+- **Session Keys**: Unique Ed25519 identity per device
 
 ## 📄 License
 
@@ -329,33 +230,9 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
-- **Hashicorp mDNS**: For reliable peer discovery
-- **Flutter Team**: For the amazing cross-platform framework
-- **Go Community**: For excellent networking libraries
-- **Rust Community**: For zero-cost abstractions and safety
-
-## 🐛 Known Issues
-
-- **Android 14+**: SELinux restrictions may affect network interface enumeration
-- **Windows Firewall**: May require manual permission for daemon ports
-- **Large Files**: Transfers >2GB require code modifications
-
-## 🗺️ Roadmap
-
-- [ ] Bluetooth transport support
-- [ ] USB direct transfer
-- [ ] Cloud relay for internet transfers
-- [ ] End-to-end encrypted cloud backup
-- [ ] Multi-language support
-- [ ] iOS support
-- [ ] Web interface
-
-## 📞 Support
-
-For issues, questions, or contributions:
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/hydrashare/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/hydrashare/discussions)
+- **Quinn**: For the incredible QUIC implementation in Rust.
+- **Flutter Team**: For the beautiful cross-platform UI.
+- **Rusqlite**: For high-performance SQLite bindings.
 
 ---
 

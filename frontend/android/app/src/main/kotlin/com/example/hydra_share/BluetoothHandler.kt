@@ -4,6 +4,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
 import android.content.Context
+import android.content.Intent
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.IOException
@@ -15,13 +16,55 @@ class BluetoothHandler(private val context: Context) : MethodChannel.MethodCallH
     private val HYDRA_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB") // SPP UUID
     private var connectedSocket: BluetoothSocket? = null
 
+    private val discoveredDevices = mutableListOf<BluetoothDevice>()
+
+    private val receiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val action = intent.action
+            if (BluetoothDevice.ACTION_FOUND == action) {
+                val device: BluetoothDevice? = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                if (device != null) {
+                    val alreadyExists = discoveredDevices.any { it.address == device.address }
+                    if (!alreadyExists) {
+                        discoveredDevices.add(device)
+                    }
+                }
+            }
+        }
+    }
+
+    private var isReceiverRegistered = false
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "startBluetoothDiscovery" -> {
+                if (bluetoothAdapter == null) {
+                    result.error("NOT_AVAILABLE", "Bluetooth not available", null)
+                    return
+                }
+                if (!isReceiverRegistered) {
+                    val filter = android.content.IntentFilter(BluetoothDevice.ACTION_FOUND)
+                    context.registerReceiver(receiver, filter)
+                    isReceiverRegistered = true
+                }
+                bluetoothAdapter.startDiscovery()
+                result.success(true)
+            }
+            "getBluetoothPeers" -> {
+               val pairedDevices = bluetoothAdapter?.bondedDevices ?: emptySet()
+               val allDevices = (pairedDevices + discoveredDevices).distinctBy { it.address }
+               
+               val mappedDevices = allDevices.map { device ->
+                    mapOf(
+                        "id" to device.address,
+                        "name" to (device.name ?: "Unknown"),
+                        "type" to "bluetooth"
+                    )
+               }
+               result.success(mappedDevices)
+            }
             "isBluetoothAvailable" -> {
                 result.success(bluetoothAdapter != null && bluetoothAdapter.isEnabled)
-            }
-            "discoverBluetoothPeers" -> {
-                discoverPeers(result)
             }
             "connectBluetooth" -> {
                 val peerId = call.argument<String>("peerId")
@@ -35,24 +78,6 @@ class BluetoothHandler(private val context: Context) : MethodChannel.MethodCallH
                 result.notImplemented()
             }
         }
-    }
-
-    private fun discoverPeers(result: MethodChannel.Result) {
-        if (bluetoothAdapter == null) {
-            result.error("NOT_AVAILABLE", "Bluetooth not available", null)
-            return
-        }
-
-        val pairedDevices = bluetoothAdapter.bondedDevices
-        val devices = pairedDevices.map { device ->
-            mapOf(
-                "id" to device.address,
-                "name" to (device.name ?: "Unknown"),
-                "type" to "bluetooth"
-            )
-        }
-
-        result.success(devices)
     }
 
     private fun connectToPeer(peerId: String, result: MethodChannel.Result) {

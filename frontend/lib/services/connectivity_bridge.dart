@@ -17,13 +17,21 @@ class WiFiDirectBridge {
     }
   }
 
-  /// Discover nearby WiFi-Direct peers
-  static Future<List<Map<String, dynamic>>> discoverPeers() async {
+  /// Start WiFi-Direct discovery (results available via getPeers)
+  static Future<void> startDiscovery() async {
     try {
-      final result = await platform.invokeMethod('discoverWiFiDirectPeers');
+      await platform.invokeMethod('startWiFiDirectDiscovery');
+    } on PlatformException catch (_) {
+      print('WiFi-Direct discovery failed');
+    }
+  }
+
+  /// Get currently discovered WiFi-Direct peers
+  static Future<List<Map<String, dynamic>>> getPeers() async {
+    try {
+      final result = await platform.invokeMethod('getWiFiDirectPeers');
       return List<Map<String, dynamic>>.from(result ?? []);
-    } on PlatformException catch (e) {
-      print('WiFi-Direct discovery failed: ${e.message}');
+    } on PlatformException {
       return [];
     }
   }
@@ -56,13 +64,21 @@ class BluetoothBridge {
     }
   }
 
-  /// Discover nearby Bluetooth peers
-  static Future<List<Map<String, dynamic>>> discoverPeers() async {
+  /// Start Bluetooth discovery
+  static Future<void> startDiscovery() async {
     try {
-      final result = await platform.invokeMethod('discoverBluetoothPeers');
-      return List<Map<String, dynamic>>.from(result ?? []);
+      await platform.invokeMethod('startBluetoothDiscovery');
     } on PlatformException catch (e) {
       print('Bluetooth discovery failed: ${e.message}');
+    }
+  }
+
+  /// Get currently discovered Bluetooth peers
+  static Future<List<Map<String, dynamic>>> getPeers() async {
+    try {
+      final result = await platform.invokeMethod('getBluetoothPeers');
+      return List<Map<String, dynamic>>.from(result ?? []);
+    } on PlatformException {
       return [];
     }
   }

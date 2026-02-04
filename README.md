@@ -1,6 +1,6 @@
 # 🌊 HydraShare
 
-**Secure, Fast, Cross-Platform File Sharing**
+## Secure, Fast, Cross-Platform File Sharing
 
 HydraShare is a modern peer-to-peer file sharing application that enables seamless file transfers between devices on the same network. Built with security, speed, and user experience in mind.
 
@@ -41,27 +41,11 @@ HydraShare uses a streamlined architecture focusing on performance and safety:
 
 ```mermaid
 graph TD
-    subgraph Frontend ["Flutter Frontend (UI)"]
-        UI[QR Scanner & Generator]
-        TP[File Picker & Transfer UI]
-        CH[Chat Interface]
-        DM[Device Management]
-    end
-
-    subgraph Backend ["Rust Engine (hydra_muscle)"]
-        disc[mDNS Peer Discovery]
-        sec[Encryption & Key Management]
-        coord[Transfer Coordination]
-        mesh[Mesh Orchestration]
-        db[(SQLite Database)]
-        ffi[FFI Command API]
-    end
-
-    UI -->|JSON Commands| ffi
-    ffi --> disc
-    ffi --> db
-    ffi --> coord
-    coord --> sec
+    Flutter[Flutter UI] -- JSON Commands --> FFI[FFI Bridge]
+    FFI --> Engine[EngineState]
+    Engine --> Services[Auth, Mesh, Discovery, Transfer]
+    Services <--> DB[(SQLite)]
+    Engine -- JSON Events --> Flutter
 ```
 
 ### Technology Stack
@@ -194,7 +178,7 @@ cd frontend
 flutter test integration_test/app_test.dart
 ```
 
-### Integration Tests
+### Automated Transfer Monitoring
 
 ```bash
 # Run automated transfer test
@@ -217,7 +201,7 @@ cd daemon/scripts
 - **5051**: Peer Discovery (mDNS)
 - **5053**: Mesh signaling and incoming transfers (QUIC)
 
-### Security Settings
+### Device Security Configuration
 
 - **Encryption**: AES-256-GCM (Permanent)
 - **Hash Algorithm**: SHA-256 for file verification

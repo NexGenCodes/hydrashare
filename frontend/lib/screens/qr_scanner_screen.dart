@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/daemon_service.dart';
-import '../widgets/qr_scanner_overlay_shape.dart';
-import 'home_screen.dart';
 import 'manual_pairing_screen.dart';
+import 'home_screen.dart';
 
 class QrScannerScreen extends StatefulWidget {
   const QrScannerScreen({super.key});
@@ -14,156 +14,57 @@ class QrScannerScreen extends StatefulWidget {
 }
 
 class _QrScannerScreenState extends State<QrScannerScreen> {
+  final MobileScannerController controller = MobileScannerController(
+    detectionSpeed: DetectionSpeed.noDuplicates,
+  );
   final DaemonService _daemonService = DaemonService();
-  bool _isScanning = true;
   bool _isConnecting = false;
-  String? _expectedHostIp; // Track the IP we're trying to connect to
-  late StreamSubscription _connectionSubscription;
-
-  @override
-  void initState() {
-    super.initState();
-    _connectDaemon();
-    _setupConnectionListener();
-  }
-
-  void _setupConnectionListener() {
-    _connectionSubscription = _daemonService.responses.listen((response) {
-      if (response['type'] == 'PEER_CONNECTED' &&
-          _isConnecting &&
-          _expectedHostIp != null) {
-        final connectedIp = response['ip'] as String?;
-        // Only navigate if we connected to the expected host (not localhost)
-        if (connectedIp == _expectedHostIp && connectedIp != '127.0.0.1') {
-          debugPrint(
-            '✅ Guest connected to host $connectedIp, navigating to HomeScreen',
-          );
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => HomeScreen(daemonService: _daemonService),
-              ),
-            );
-          }
-        }
-      }
-    });
-  }
-
-  Future<void> _connectDaemon() async {
-    try {
-      await _daemonService.connect();
-    } catch (e) {
-      debugPrint('Error connecting to daemon: $e');
-    }
-  }
+  StreamSubscription? _responseSubscription;
 
   @override
   void dispose() {
-    _connectionSubscription.cancel();
+    controller.dispose();
+    _responseSubscription?.cancel();
     super.dispose();
   }
 
-  void _onDetect(BarcodeCapture capture) async {
-    if (!_isScanning || _isConnecting) return;
+  Future<void> _handleQrCode(BarcodeCapture capture) async {
+    if (_isConnecting) return;
+    setState(() => _isConnecting = true);
 
-    final List<Barcode> barcodes = capture.barcodes;
-    for (final barcode in barcodes) {
-      if (barcode.rawValue != null) {
-        // Found a code
-        setState(() {
-          _isScanning = false;
-          _isConnecting = true;
-        });
-
-        _handleCode(barcode.rawValue!);
-        break;
-      }
-    }
-  }
-
-  Future<void> _handleCode(String code) async {
     try {
-      if (code.startsWith('hydra://')) {
-        debugPrint('🔗 Detected Session Code: $code');
-        final status = await _daemonService.joinWithSessionCode(code);
-        if (mounted) {
-          if (status == 'connected') {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => HomeScreen(daemonService: _daemonService),
-              ),
-            );
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  '📡 MFR Signaling started... Waiting for remote peer.',
-                ),
-              ),
-            );
-          }
-        }
-        return;
+      final String? code = capture.barcodes.firstOrNull?.rawValue;
+      if (code == null || code.isEmpty) {
+        throw Exception('Invalid QR code');
       }
 
-      // Parse the code: format is "ip|key"
-      final parts = code.split('|');
-      final targetIp = parts[0];
-      debugPrint('Scanned IP: $targetIp');
+      await controller.stop();
 
-      // Ignore localhost connections
-      if (targetIp == '127.0.0.1') {
-        if (mounted) {
-          setState(() {
-            _isConnecting = false;
-            _isScanning = true;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Cannot connect to localhost. Please scan a different device.',
-              ),
-              backgroundColor: Colors.orange,
+      if (!_daemonService.isConnected) {
+        await _daemonService.connect();
+      }
+
+      _responseSubscription = _daemonService.responses.listen((response) {
+        if (response['type'] == 'PEER_CONNECTED' && mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) => HomeScreen(daemonService: _daemonService),
             ),
+            (route) => false,
           );
         }
-        return;
-      }
-
-      // Set the expected host IP before connecting
-      setState(() {
-        _expectedHostIp = targetIp;
       });
 
-      // Send to daemon - this will complete after successful handshake
-      await _daemonService.connectToPeer(targetIp);
-
-      if (mounted) {
-        // Connection successful, navigate to HomeScreen
-        debugPrint(
-          '✅ Guest successfully connected to $targetIp, navigating to HomeScreen',
-        );
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => HomeScreen(daemonService: _daemonService),
-          ),
-        );
-      }
+      await _daemonService.connectToPeer(code);
     } catch (e) {
-      // TODO: If connection fails, check for another way to connect (e.g., relay, bluetooth, etc.)
       if (mounted) {
-        setState(() {
-          _isConnecting = false;
-          _isScanning = true; // Resume scanning
-        });
+        setState(() => _isConnecting = false);
+        await controller.start();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Connection failed: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: Colors.red.shade600,
           ),
         );
       }
@@ -172,26 +73,55 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('Scan Host QR Code'),
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+        title: const Text('Scan QR Code'),
+        leading: BackButton(onPressed: () => Navigator.pop(context)),
       ),
       body: Stack(
         children: [
+          // Camera View
           MobileScanner(
-            onDetect: _onDetect,
+            controller: controller,
+            onDetect: _handleQrCode,
             errorBuilder: (context, error) {
+              final isWindows =
+                  Theme.of(context).platform == TargetPlatform.windows;
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.error, color: Colors.orange, size: 48),
-                    const SizedBox(height: 16),
+                    Icon(
+                      isWindows
+                          ? Icons.computer_rounded
+                          : Icons.error_outline_rounded,
+                      color: theme.colorScheme.primary.withOpacity(0.5),
+                      size: 64,
+                    ),
+                    const SizedBox(height: 24),
                     Text(
-                      'Camera Error: ${error.errorCode}',
-                      style: const TextStyle(color: Colors.white),
+                      isWindows
+                          ? 'Scanning not supported on Windows'
+                          : 'Camera Error',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 40),
+                      child: Text(
+                        isWindows
+                            ? 'The QR scanner plugin is currently optimized for mobile. Please use Manual PIN entry for this desktop.'
+                            : 'Could not access the camera. Please check your permissions.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurface.withOpacity(0.6),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -199,82 +129,120 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             },
           ),
 
-          // Overlay
+          // Scanning frame overlay
           Container(
-            decoration: ShapeDecoration(
-              shape: QrScannerOverlayShape(
-                borderColor: Colors.deepPurple,
-                borderRadius: 10,
-                borderLength: 30,
-                borderWidth: 10,
-                cutOutSize: 300,
-              ),
-            ),
-          ),
-
-          // Instructions
-          Positioned(
-            bottom: 80,
-            left: 0,
-            right: 0,
-            child: Text(
-              _isConnecting
-                  ? 'Connecting...'
-                  : 'Align QR code within the frame',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-              ),
-            ),
-          ),
-
-          // Loading Indicator
-          if (_isConnecting)
-            Container(
-              color: Colors.black54,
-              child: const Center(
-                child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
+            decoration: BoxDecoration(color: Colors.black.withOpacity(0.5)),
+            child: Center(
+              child: Container(
+                width: 280,
+                height: 280,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: theme.colorScheme.primary,
+                    width: 4,
+                  ),
+                  borderRadius: BorderRadius.circular(24),
                 ),
               ),
             ),
+          ),
 
-          // Manual Entry Button
-          Positioned(
-            bottom: 20,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: ElevatedButton.icon(
-                onPressed: _isConnecting
-                    ? null
-                    : () {
-                        Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const ManualPairingScreen(),
-                          ),
-                        );
-                      },
-                icon: const Icon(Icons.dialpad),
-                label: const Text('Enter PIN Manually'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.deepPurple,
+          // Instructions overlay
+          if (!_isConnecting)
+            Positioned(
+              top: 40,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 24),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
-                    vertical: 12,
+                    vertical: 16,
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+                  decoration: BoxDecoration(
+                    color: theme.cardColor.withOpacity(0.95),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    'Point camera at QR code',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
               ),
             ),
-          ),
+
+          // Loading overlay
+          if (_isConnecting)
+            Container(
+              color: Colors.black.withOpacity(0.8),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        theme.colorScheme.primary,
+                      ),
+                      strokeWidth: 3,
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Connecting...',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Manual entry button
+          if (!_isConnecting)
+            Positioned(
+              bottom: 40,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 400),
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  height: 56,
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ManualPairingScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.dialpad_rounded),
+                    label: const Text('Enter PIN Manually'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: theme.colorScheme.primary,
+                      foregroundColor: theme.colorScheme.onPrimary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );

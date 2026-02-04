@@ -17,6 +17,21 @@ pub enum TransferStatus {
     Cancelled,
 }
 
+impl std::fmt::Display for TransferDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransferDirection::Send => write!(f, "SEND"),
+            TransferDirection::Receive => write!(f, "RECEIVE"),
+        }
+    }
+}
+
+impl std::fmt::Display for TransferStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransferSession {
     pub id: String,
@@ -27,6 +42,11 @@ pub struct TransferSession {
     pub status: TransferStatus,
     pub start_offset: u64,
     pub peer_id: String,
+    pub missing_blocks: Option<Vec<usize>>,
+    pub speed: f64,
+    pub last_reported_bytes: u64,
+    pub last_reported_at: u128,
+    pub last_db_write: u64,
     pub created_at: u64,
     pub last_updated: u64,
 }
@@ -47,6 +67,11 @@ impl TransferSession {
             status: TransferStatus::Pending,
             start_offset: 0,
             peer_id,
+            missing_blocks: None,
+            speed: 0.0,
+            last_reported_bytes: 0,
+            last_reported_at: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis(),
+            last_db_write: 0,
             created_at: now,
             last_updated: now,
         }

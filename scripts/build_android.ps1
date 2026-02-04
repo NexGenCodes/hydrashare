@@ -21,9 +21,7 @@ function Write-Error-Custom ($msg) {
 Write-Step "Preparing Android Build Environment..."
 
 # 1. Environment Setup
-$env:GOOS = "android"
-$env:GOARCH = "arm64"
-$env:CGO_ENABLED = "1"
+Write-Step "Preparing Android Build Environment..."
 
 # Locate Android NDK
 $NDK = $env:ANDROID_NDK_HOME
@@ -43,7 +41,6 @@ if (!(Test-Path $NDK)) {
 }
 Write-Info "Using NDK: $NDK"
 
-# Crucial for aws-lc-rs and other Rust crates
 $env:ANDROID_NDK = $NDK
 $env:ANDROID_NDK_HOME = $NDK
 $env:ANDROID_NDK_ROOT = $NDK
@@ -67,7 +64,6 @@ if (Test-Path "$NDK\prebuilt\windows-x86_64\bin\cmake.exe") {
 # 2. Dependency Check
 Write-Step "Checking Dependencies..."
 if (!(Get-Command cargo -ErrorAction SilentlyContinue)) { Write-Error-Custom "Cargo not found"; exit 1 }
-if (!(Get-Command go -ErrorAction SilentlyContinue)) { Write-Error-Custom "Go not found"; exit 1 }
 
 # 3. Build Components
 Write-Step "Building Rust Library (aarch64-linux-android)..."
@@ -77,28 +73,26 @@ $env:AR_aarch64_linux_android = Join-Path $TOOLCHAIN "bin\llvm-ar.exe"
 $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = Join-Path $TOOLCHAIN "bin\aarch64-linux-android35-clang.cmd"
 
 Push-Location $RUST_DIR
-cargo build --target aarch64-linux-android
+cargo build --target aarch64-linux-android --release
 if ($LASTEXITCODE -ne 0) { Write-Error-Custom "Rust build failed"; exit 1 }
 Pop-Location
 
-Write-Step "Building Go Daemon..."
-if (!(Test-Path $BIN_DIR)) { New-Item -ItemType Directory -Path $BIN_DIR }
-$libSrc = "$RUST_DIR\target\aarch64-linux-android\debug\libhydra_muscle.so"
+# 4. Prepare Artifacts
+Write-Step "Collecting Android Artifacts..."
+if (!(Test-Path $BIN_DIR)) { New-Item -ItemType Directory -Path $BIN_DIR | Out-Null }
+
+$libSrc = "$RUST_DIR\target\aarch64-linux-android\release\libhydra_muscle.so"
 if (!(Test-Path $libSrc)) {
     Write-Error-Custom "Rust .so not found at $libSrc"
     exit 1
 }
+
+# Copy to central bin
 Copy-Item $libSrc -Destination "$BIN_DIR\" -Force
 
-# Setup CGO
-$env:CC = Join-Path $TOOLCHAIN "bin\aarch64-linux-android35-clang.cmd"
-# CGo on Windows often prefers forward slashes for linker paths
-$cgoLibPath = $BIN_DIR.Replace('\', '/')
-$env:CGO_LDFLAGS = "-L$cgoLibPath -lhydra_muscle"
-
-Push-Location $DAEMON_DIR
-go build -o bin\android\hydra_daemon.so -buildmode=c-shared .\cmd\hydra_daemon
-if ($LASTEXITCODE -ne 0) { Write-Error-Custom "Go building failed"; exit 1 }
-Pop-Location
+# ALSO copy to Flutter's jniLibs for immediate use
+$jniDir = "$PSScriptRoot\..\frontend\android\app\src\main\jniLibs\arm64-v8a"
+if (!(Test-Path $jniDir)) { New-Item -ItemType Directory -Path $jniDir | Out-Null }
+Copy-Item $libSrc -Destination "$jniDir\" -Force
 
 Write-Host "`n✅ Android Build Successful! Artifacts in: $BIN_DIR" -ForegroundColor Green

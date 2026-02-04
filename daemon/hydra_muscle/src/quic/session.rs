@@ -8,7 +8,7 @@ use std::ffi::c_void;
 use crate::quic::MessageCallback;
 
 pub struct Session {
-    pub connection: Connection,
+    pub connections: Vec<Connection>,
     pub data_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<(quinn::SendStream, quinn::RecvStream)>>>,
 }
 
@@ -18,7 +18,9 @@ pub static NEXT_SESSION_ID: AtomicU32 = AtomicU32::new(1);
 
 pub fn close_session(session_id: u32) {
     if let Some(session) = SESSIONS.write().unwrap().remove(&session_id) {
-        session.connection.close(0u32.into(), b"closed");
+        for conn in session.connections {
+            conn.close(0u32.into(), b"closed");
+        }
     }
     SESSION_CALLBACKS.write().unwrap().remove(&session_id);
 }
@@ -57,7 +59,6 @@ pub async fn session_dispatcher(
             Err(_) => break,
         }
     }
-    close_session(session_id);
 }
 
 pub fn register_session_callback(session_id: u32, callback: MessageCallback, user_data: *mut c_void) {

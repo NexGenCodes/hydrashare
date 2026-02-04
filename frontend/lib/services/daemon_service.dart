@@ -9,6 +9,8 @@ import 'package:path/path.dart' as p;
 import 'device_info_service.dart';
 import 'storage_service.dart';
 import 'rust_daemon_ffi.dart';
+import 'connectivity_bridge.dart';
+import 'mpc_bridge.dart';
 
 /// Service class for managing the native Rust engine via FFI
 class DaemonService {
@@ -27,10 +29,16 @@ class DaemonService {
       StreamController<List<Map<String, dynamic>>>.broadcast();
   final List<Map<String, dynamic>> _connectedPeers = [];
 
+  final _discoveredPeersController =
+      StreamController<List<Map<String, dynamic>>>.broadcast();
+  final List<Map<String, dynamic>> _discoveredPeers = [];
+
   final _chatController = StreamController<Map<String, dynamic>>.broadcast();
   final _fileOfferController =
       StreamController<Map<String, dynamic>>.broadcast();
   final _warningController = StreamController<Map<String, dynamic>>.broadcast();
+
+  Timer? _discoveryTimer;
 
   String _currentRole = 'none'; // 'host', 'guest', or 'none'
 
@@ -44,6 +52,14 @@ class DaemonService {
   /// Current list of connected peers
   List<Map<String, dynamic>> get currentPeers =>
       List.unmodifiable(_connectedPeers);
+
+  /// Stream of discovered (but not yet connected) peers
+  Stream<List<Map<String, dynamic>>> get discoveredPeers =>
+      _discoveredPeersController.stream;
+
+  /// Current list of discovered peers
+  List<Map<String, dynamic>> get currentDiscoveredPeers =>
+      List.unmodifiable(_discoveredPeers);
 
   /// Stream of incoming chat messages
   Stream<Map<String, dynamic>> get messages => _chatController.stream;
@@ -127,9 +143,7 @@ class DaemonService {
           } else if (response['type'] == 'SIGNALING_STARTED') {
             debugPrint('📡 MFR Signaling started for: ${response['id']}');
           } else if (response['type'] == 'PEER_DISCOVERED') {
-            debugPrint(
-              '🔭 Peer discovered on network: ${response['name']} (${response['ip']})',
-            );
+            _addDiscoveredPeer(response);
           } else if (response['type'] == 'PEER_DISCOVERY_CARD') {
             _handleMeshIntroduction(response);
           } else if (response['type'] == 'RECEIVE_STARTED') {
@@ -164,6 +178,10 @@ class DaemonService {
             // Forward to response controller (handled by UI)
           } else if (response['type'] == 'TRANSFER_COMPLETE') {
             debugPrint('✅ Transfer complete: ${response['transfer_id']}');
+          } else if (response['type'] == 'QR_PAYLOAD_GENERATED') {
+            debugPrint('📱 QR Payload Generated');
+          } else if (response['type'] == 'SETTING_REPORTED') {
+            // Handled via getSetting completer
           }
           // Add other event types as needed
         } catch (e) {
@@ -196,11 +214,68 @@ class DaemonService {
   /// Start discovering peers on the network
   Future<void> startDiscovery() async {
     await sendCommand({'type': 'START_DISCOVERY'});
+
+    if (!kIsWeb && Platform.isAndroid) {
+      debugPrint('🌲 Starting Native Discovery (WiFi-Direct/Bluetooth)...');
+      await WiFiDirectBridge.startDiscovery();
+      await BluetoothBridge.startDiscovery();
+
+      _discoveryTimer?.cancel();
+      _discoveryTimer = Timer.periodic(
+        const Duration(seconds: 4),
+        (_) => _pollNativePeers(),
+      );
+    }
+
+    if (!kIsWeb && Platform.isIOS) {
+      debugPrint('🍏 Starting iOS Native Discovery (MPC)...');
+      await MpcBridge.startMpc();
+      MpcBridge.peerFound.listen((peer) {
+        _emitNativePeer(peer, 'mpc', 0);
+      });
+    }
   }
 
   /// Stop discovering peers
   Future<void> stopDiscovery() async {
     await sendCommand({'type': 'STOP_DISCOVERY'});
+    _discoveryTimer?.cancel();
+    if (Platform.isIOS) {
+      await MpcBridge.stopMpc();
+    }
+  }
+
+  Future<void> _pollNativePeers() async {
+    try {
+      final wifiPeers = await WiFiDirectBridge.getPeers();
+      for (final p in wifiPeers) {
+        _emitNativePeer(
+          p,
+          'wifi-direct',
+          5052,
+        ); // Assuming standard port or negotiation
+      }
+
+      final btPeers = await BluetoothBridge.getPeers();
+      for (final p in btPeers) {
+        _emitNativePeer(p, 'bluetooth', 0);
+      }
+    } catch (e) {
+      debugPrint('Error polling native peers: $e');
+    }
+  }
+
+  void _emitNativePeer(Map<String, dynamic> peer, String type, int port) {
+    if (peer['id'] == null) return;
+
+    _responseController.add({
+      'type': 'PEER_DISCOVERED',
+      'ip': peer['id'], // Using ID as IP/Address for native connection
+      'name': peer['name'] ?? 'Unknown Peer',
+      'port': port,
+      'protocol': type,
+      'is_native': true,
+    });
   }
 
   /// Generate a secure AES encryption key for QR handshake
@@ -293,7 +368,7 @@ class DaemonService {
     });
 
     // Send the command
-    await sendCommand({'type': 'CONNECT_WITH_PIN', 'key': pin});
+    await sendCommand({'type': 'JOIN_SESSION', 'pin': pin});
 
     // Wait for response with timeout
     try {
@@ -304,6 +379,35 @@ class DaemonService {
         },
       );
       await subscription.cancel();
+    } catch (e) {
+      await subscription.cancel();
+      rethrow;
+    }
+  }
+
+  /// Generate a QR payload for instant mobile pairing
+  Future<Map<String, dynamic>> generateQrPayload() async {
+    final completer = Completer<Map<String, dynamic>>();
+
+    final subscription = responses.listen((response) {
+      if (response['type'] == 'QR_PAYLOAD_GENERATED') {
+        completer.complete(jsonDecode(response['payload_json'] as String));
+      } else if (response['type'] == 'ERROR') {
+        completer.completeError(response['error'] ?? 'Unknown error');
+      }
+    });
+
+    await sendCommand({'type': 'GENERATE_QR_PAYLOAD'});
+
+    try {
+      final payload = await completer.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          throw TimeoutException('QR payload generation timed out');
+        },
+      );
+      await subscription.cancel();
+      return payload;
     } catch (e) {
       await subscription.cancel();
       rethrow;
@@ -428,6 +532,10 @@ class DaemonService {
     await sendCommand({'type': 'SEND_CHAT', 'dest_ip': peerIp, 'text': text});
   }
 
+  /// Alias for sendChat to maintain backward compatibility
+  Future<void> sendMessage(String peerIp, String text) =>
+      sendChat(peerIp, text);
+
   /// Broadcast a chat message to all connected peers (Host only)
   Future<void> broadcastChat(String text) async {
     await StorageService().saveMessage(
@@ -436,6 +544,11 @@ class DaemonService {
       isMe: true,
     );
     await sendCommand({'type': 'BROADCAST_CHAT', 'text': text});
+  }
+
+  /// Get message history for a peer
+  Future<List<Map<String, dynamic>>> getMessages(String peerIp) async {
+    return await StorageService().getHistory(peerIp);
   }
 
   /// Close the connection to the daemon
@@ -491,6 +604,12 @@ class DaemonService {
     final id = peer['id'] ?? peer['ip'] ?? peer['dest_ip'];
     if (id == null) return;
 
+    // Remove from discovered list if it was there
+    _discoveredPeers.removeWhere(
+      (p) => (p['id'] ?? p['ip'] ?? p['dest_ip']) == id,
+    );
+    _discoveredPeersController.add(currentDiscoveredPeers);
+
     final index = _connectedPeers.indexWhere(
       (p) => (p['id'] ?? p['ip'] ?? p['dest_ip']) == id,
     );
@@ -503,6 +622,29 @@ class DaemonService {
       _connectedPeers.add(peer);
     }
     _connectedPeersController.add(currentPeers);
+  }
+
+  void _addDiscoveredPeer(Map<String, dynamic> peer) {
+    final id = peer['id'] ?? peer['ip'] ?? peer['dest_ip'];
+    if (id == null) return;
+
+    // Don't add if already connected
+    final isConnected = _connectedPeers.any(
+      (p) => (p['id'] ?? p['ip'] ?? p['dest_ip']) == id,
+    );
+    if (isConnected) return;
+
+    final index = _discoveredPeers.indexWhere(
+      (p) => (p['id'] ?? p['ip'] ?? p['dest_ip']) == id,
+    );
+
+    if (index != -1) {
+      _discoveredPeers[index] = {..._discoveredPeers[index], ...peer};
+    } else {
+      debugPrint('🔭 Peer discovered: ${peer['name']} ($id)');
+      _discoveredPeers.add(peer);
+    }
+    _discoveredPeersController.add(currentDiscoveredPeers);
   }
 
   void _removeConnectedPeer(Map<String, dynamic> peer) {
@@ -535,9 +677,10 @@ class DaemonService {
   }
 
   /// Send a file offer to a peer
-  Future<void> sendFile(String filePath, String destIp) async {
+  Future<void> sendFile(String peerId, String filePath, String destIp) async {
     await sendCommand({
       'type': 'SEND_FILE',
+      'peer_id': peerId,
       'file_path': filePath,
       'dest_ip': destIp,
     });
@@ -587,6 +730,27 @@ class DaemonService {
       'key': 'max_file_size',
       'text': bytes.toString(),
     });
+  }
+
+  /// Settings: Get a setting value
+  Future<String> getSetting(String key) async {
+    final completer = Completer<String>();
+    final subscription = responses.listen((response) {
+      if (response['type'] == 'SETTING_REPORTED' && response['key'] == key) {
+        completer.complete(response['value'] as String);
+      }
+    });
+
+    await sendCommand({'type': 'GET_SETTINGS', 'key': key});
+
+    try {
+      final value = await completer.future.timeout(const Duration(seconds: 3));
+      await subscription.cancel();
+      return value;
+    } catch (e) {
+      await subscription.cancel();
+      return '';
+    }
   }
 
   Future<String?> _getLocalIp() async {

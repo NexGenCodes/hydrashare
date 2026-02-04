@@ -27,7 +27,16 @@ class HydraMuscleFfi {
 
   static Stream<String> get events => _eventController.stream;
 
+  static bool isMockMode = false;
+
   static void init() {
+    if (isMockMode) {
+      debugPrint('⚠️ Initializing Hydra Muscle in MOCK MODE');
+      _isInitialized = true;
+      _startPolling();
+      return;
+    }
+
     if (_isInitialized) return;
 
     try {
@@ -52,6 +61,7 @@ class HydraMuscleFfi {
   }
 
   static int startEngine(String dbPath) {
+    if (isMockMode) return 0;
     if (_lib == null) return -1;
 
     final start = _lib!
@@ -67,10 +77,14 @@ class HydraMuscleFfi {
   }
 
   static int sendCommand(String json) {
+    if (isMockMode) {
+      // Echo specific responses for testing if needed
+      return 0;
+    }
     if (_lib == null) return -1;
 
     final send = _lib!
-        .lookup<NativeFunction<SendCommandFunc>>('send_command')
+        .lookup<NativeFunction<SendCommandFunc>>('send_command_json')
         .asFunction<SendCommand>();
 
     final jsonPtr = json.toNativeUtf8();
@@ -82,6 +96,7 @@ class HydraMuscleFfi {
   }
 
   static void stopEngine() {
+    if (isMockMode) return;
     if (_lib == null) return;
     _eventTimer?.cancel();
 
@@ -99,6 +114,7 @@ class HydraMuscleFfi {
   }
 
   static void _poll() {
+    if (isMockMode) return;
     if (_lib == null) return;
 
     final poll = _lib!

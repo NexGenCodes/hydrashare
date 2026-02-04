@@ -1,9 +1,8 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:flutter/services.dart';
 import '../services/daemon_service.dart';
-import 'home_screen.dart';
+import '../widgets/adaptive_layout.dart';
+import '../core/utils/platform_utils.dart';
 
 class QrHandshakeScreen extends StatefulWidget {
   final DaemonService daemonService;
@@ -15,514 +14,267 @@ class QrHandshakeScreen extends StatefulWidget {
 }
 
 class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
-  String? _generatedKey;
-  String? _displayPin;
-  bool _isGenerating = false;
-  bool _isRemoteMode = false;
-  late StreamSubscription _connectionSubscription;
+  final ScrollController _scrollController = ScrollController();
+
+  String? _pin;
+  String? _qrData;
+  bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _generateCode();
-
-    // Listen for peer connection
-    _connectionSubscription = widget.daemonService.responses.listen((response) {
-      if (response['type'] == 'PEER_CONNECTED') {
-        debugPrint('🤝 Peer connected event received in Handshake Screen');
-        if (mounted) {
-          _goToHomeScreen();
-        }
-      }
-    });
+    _initializePairing();
   }
 
-  void _goToHomeScreen() {
-    if (!mounted) return;
+  Future<void> _initializePairing() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
 
-    debugPrint('🚀 Navigating to HomeScreen');
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => HomeScreen(daemonService: widget.daemonService),
-      ),
-    );
+      // Ensure daemon is connected if not already
+      if (!widget.daemonService.isConnected) {
+        await widget.daemonService.connect();
+      }
+
+      // Generate pairing code and get host IP
+      final result = await widget.daemonService.generateCodeWithIP();
+
+      if (mounted) {
+        setState(() {
+          _pin = result['pin'];
+          // Expected format for guest scanner: "ip|key"
+          _qrData = "${result['ip']}|${result['key']}";
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error initializing pairing: $e');
+      if (mounted) {
+        setState(() {
+          _errorMessage = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
-    _connectionSubscription.cancel();
+    _scrollController.dispose();
     super.dispose();
-  }
-
-  Future<void> _generateCode() async {
-    setState(() {
-      _isGenerating = true;
-    });
-
-    try {
-      // Check if daemon is connected
-      if (!widget.daemonService.isConnected) {
-        debugPrint('⚠️ Daemon not connected, attempting to connect...');
-        await widget.daemonService.connect();
-      }
-
-      if (_isRemoteMode) {
-        final code = await widget.daemonService.generateSessionCode();
-        setState(() {
-          _generatedKey = code;
-          _displayPin = null; // Session codes are long URLs
-          _isGenerating = false;
-        });
-      } else {
-        final result = await widget.daemonService.generateCodeWithIP();
-        setState(() {
-          final ip = result['ip'];
-          final key = result['key'];
-          final pin = result['pin'];
-
-          // QR Code = IP|KEY (for secure scanning)
-          _generatedKey = '$ip|$key';
-
-          // Display PIN = PIN (for manual entry)
-          _displayPin = pin;
-
-          _isGenerating = false;
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _isGenerating = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to generate code: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Send Files (Host)'),
-        backgroundColor: Colors.transparent,
-        foregroundColor: Colors.black87,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _isGenerating ? null : _generateCode,
-            tooltip: 'Regenerate Code',
-          ),
-        ],
-      ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Colors.white, Colors.grey.shade100],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // Header
-              Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  children: [
-                    const Icon(
-                      Icons.qr_code_2,
-                      color: Colors.deepPurple,
-                      size: 48,
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Ready to Transfer',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _isRemoteMode
-                          ? 'Share session code via QR'
-                          : 'Ask the receiver to scan this code',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: Colors.black54,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    // Toggle Mode Button
-                    OutlinedButton.icon(
-                      onPressed: _isGenerating
-                          ? null
-                          : () {
-                              setState(() {
-                                _isRemoteMode = !_isRemoteMode;
-                                _generateCode();
-                              });
-                            },
-                      icon: Icon(
-                        _isRemoteMode
-                            ? Icons.language_rounded
-                            : Icons.home_rounded,
-                        size: 20,
-                      ),
-                      label: Text(
-                        _isRemoteMode
-                            ? 'Switch to Local Mode'
-                            : 'Switch to Remote Mode',
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _isRemoteMode
-                            ? Colors.green
-                            : Colors.deepPurple,
-                        side: BorderSide(
-                          color: _isRemoteMode
-                              ? Colors.green
-                              : Colors.deepPurple,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+    final theme = Theme.of(context);
+    final isDesktop = PlatformUtils.isMediumScreen(context);
 
-              // Content area
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Center(
-                      child: _isGenerating
-                          ? const CircularProgressIndicator()
-                          : _generatedKey != null
-                          ? _buildQrCodeView()
-                          : _buildErrorState(),
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
-      ),
+    return AdaptiveLayout(
+      title: 'Host Connection',
+      scrollController: _scrollController,
+      maxWidth: isDesktop ? 1000 : 500,
+      child: _buildBody(theme, isDesktop),
     );
   }
 
-  Widget _buildQrCodeView() {
-    // Check if running on likely desktop platform
-    final isDesktop =
-        Theme.of(context).platform == TargetPlatform.windows ||
-        Theme.of(context).platform == TargetPlatform.macOS ||
-        Theme.of(context).platform == TargetPlatform.linux;
-
-    if (isDesktop) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          // QR Code (Left)
-          Hero(
-            tag: 'qr-code-hero',
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 24,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: QrImageView(
-                data: _generatedKey!,
-                version: QrVersions.auto,
-                size: 200.0, // Smaller on desktop to save space
-                backgroundColor: Colors.white,
-                eyeStyle: const QrEyeStyle(
-                  eyeShape: QrEyeShape.square,
-                  color: Colors.deepPurple,
-                ),
-                dataModuleStyle: const QrDataModuleStyle(
-                  dataModuleShape: QrDataModuleShape.square,
-                  color: Colors.black87,
-                ),
+  Widget _buildBody(ThemeData theme, bool isDesktop) {
+    if (_isLoading) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 24),
+            Text(
+              'Generating secure codes...',
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: theme.colorScheme.onSurface.withOpacity(0.6),
               ),
             ),
-          ),
-
-          const SizedBox(width: 48),
-
-          // PIN Display (Right, Larger)
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'PAIRING WITH DESKTOP?',
-                style: TextStyle(
-                  color: Colors.grey.shade600,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.0,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 48,
-                  vertical: 32,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.deepPurple.withOpacity(0.2)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.deepPurple.withOpacity(0.05),
-                      blurRadius: 20,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      'ENTER THIS PIN',
-                      style: TextStyle(
-                        color: Colors.deepPurple.shade700,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SelectableText(
-                      _displayPin ?? '??????',
-                      style: const TextStyle(
-                        fontSize: 64, // HUGE PIN
-                        fontWeight: FontWeight.bold,
-                        color: Colors.deepPurple,
-                        letterSpacing: 8,
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        if (_displayPin != null) {
-                          Clipboard.setData(ClipboardData(text: _displayPin!));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('PIN copied to clipboard'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        }
-                      },
-                      icon: const Icon(Icons.copy, size: 18),
-                      label: const Text('Copy PIN'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepPurple.shade50,
-                        foregroundColor: Colors.deepPurple,
-                        elevation: 0,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 32),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Waiting for connection...',
-                    style: TextStyle(
-                      color: Colors.deepPurple.shade700,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
+          ],
+        ),
       );
     }
 
-    // MOBILE LAYOUT (Original)
+    if (_errorMessage != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 64, color: theme.colorScheme.error),
+            const SizedBox(height: 24),
+            Text(
+              'Failed to generate pairing codes',
+              style: theme.textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurface.withOpacity(0.6),
+              ),
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton.icon(
+              onPressed: _initializePairing,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Try Again'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final pin = _pin ?? '000000';
+    final qrData = _qrData ?? '';
+
+    return isDesktop
+        ? _buildDesktopLayout(theme, pin, qrData)
+        : _buildMobileLayout(theme, pin, qrData);
+  }
+
+  Widget _buildDesktopLayout(ThemeData theme, String pin, String qrData) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          flex: 5,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _buildHeader(theme, true),
+              const SizedBox(height: 48),
+              _buildPinSection(theme, pin, true),
+            ],
+          ),
+        ),
+        const SizedBox(width: 64),
+        Expanded(flex: 4, child: _buildQrSection(theme, qrData, true)),
+      ],
+    );
+  }
+
+  Widget _buildMobileLayout(ThemeData theme, String pin, String qrData) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // QR Code container
-        Hero(
-          tag: 'qr-code-hero',
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: QrImageView(
-              data: _generatedKey!, // Contains IP|PIN for mobile scanning
-              version: QrVersions.auto,
-              size: 280.0, // Increased size
-              backgroundColor: Colors.white,
-              eyeStyle: const QrEyeStyle(
-                eyeShape: QrEyeShape.square,
-                color: Colors.deepPurple,
-              ),
-              dataModuleStyle: const QrDataModuleStyle(
-                dataModuleShape: QrDataModuleShape.square,
-                color: Colors.black87,
-              ),
-            ),
+        _buildHeader(theme, false),
+        const SizedBox(height: 40),
+        _buildQrSection(theme, qrData, false),
+        const SizedBox(height: 40),
+        _buildPinSection(theme, pin, false),
+      ],
+    );
+  }
+
+  Widget _buildHeader(ThemeData theme, bool isDesktop) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          'Ready to Pair',
+          style: theme.textTheme.headlineMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.onSurface,
           ),
+          textAlign: TextAlign.center,
         ),
-
-        const SizedBox(height: 32),
-
-        // PIN Display (Text)
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          decoration: BoxDecoration(
-            color: Colors.deepPurple.shade50,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.deepPurple.shade200),
+        const SizedBox(height: 12),
+        Text(
+          'Other devices can join your network by scanning the QR code or entering the PIN below.',
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.colorScheme.onSurface.withOpacity(0.6),
+            height: 1.5,
           ),
-          child: Column(
-            children: [
-              Text(
-                'PAIRING PIN',
-                style: TextStyle(
-                  color: Colors.deepPurple.shade700,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5,
-                ),
-              ),
-              const SizedBox(height: 4),
-              SelectableText(
-                _displayPin ?? '??????',
-                style: const TextStyle(
-                  fontSize: 32, // Smaller size
-                  fontWeight: FontWeight.bold,
-                  color: Colors.deepPurple,
-                  letterSpacing: 6,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 32),
-        // Wait indicator
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-          decoration: BoxDecoration(
-            color: Colors.deepPurple.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: Colors.deepPurple.withOpacity(0.2)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Waiting for connection...',
-                style: TextStyle(
-                  color: Colors.deepPurple.shade700,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 32),
-        // manual escape button
-        StreamBuilder<List<Map<String, dynamic>>>(
-          stream: widget.daemonService.connectedPeers,
-          initialData: widget.daemonService.currentPeers,
-          builder: (context, snapshot) {
-            final hasPeers = (snapshot.data ?? []).isNotEmpty;
-            if (!hasPeers) return const SizedBox.shrink();
-
-            return Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: ElevatedButton.icon(
-                onPressed: _goToHomeScreen,
-                icon: const Icon(Icons.home_rounded),
-                label: const Text('Go to Home Screen'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                ),
-              ),
-            );
-          },
+          textAlign: TextAlign.center,
         ),
       ],
     );
   }
 
-  Widget _buildErrorState() {
+  Widget _buildQrSection(ThemeData theme, String qrData, bool isDesktop) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(32),
+        side: BorderSide(
+          color: theme.colorScheme.primary.withOpacity(0.1),
+          width: 2,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            QrImageView(
+              data: qrData,
+              version: QrVersions.auto,
+              size: 280.0,
+              eyeStyle: QrEyeStyle(
+                eyeShape: QrEyeShape.circle,
+                color: theme.colorScheme.primary,
+              ),
+              dataModuleStyle: QrDataModuleStyle(
+                dataModuleShape: QrDataModuleShape.circle,
+                color: theme.colorScheme.primary.withOpacity(0.8),
+              ),
+            ),
+            if (!isDesktop) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Scan to connect',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPinSection(ThemeData theme, String pin, bool isDesktop) {
     return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Icon(Icons.error_outline, size: 64, color: Colors.red.shade300),
-        const SizedBox(height: 16),
         Text(
-          'Could not generate QR code',
-          style: TextStyle(color: Colors.grey.shade700, fontSize: 16),
+          'MANUAL PIN',
+          style: theme.textTheme.labelSmall?.copyWith(
+            letterSpacing: 2,
+            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.onSurface.withOpacity(0.5),
+          ),
         ),
         const SizedBox(height: 16),
-        ElevatedButton(
-          onPressed: _generateCode,
-          child: const Text('Try Again'),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primary.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: theme.colorScheme.primary.withOpacity(0.1),
+            ),
+          ),
+          child: Text(
+            pin,
+            style: theme.textTheme.displayMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              letterSpacing: 12,
+              color: theme.colorScheme.primary,
+              fontFamily: 'monospace',
+            ),
+          ),
         ),
       ],
     );

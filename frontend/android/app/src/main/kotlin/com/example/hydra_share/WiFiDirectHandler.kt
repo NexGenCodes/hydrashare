@@ -1,6 +1,7 @@
 package com.example.hydra_share
 
 import android.content.Context
+import android.content.Intent
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pManager
@@ -12,20 +13,42 @@ import io.flutter.plugin.common.MethodChannel
 class WiFiDirectHandler(private val context: Context) : MethodChannel.MethodCallHandler {
     private var wifiP2pManager: WifiP2pManager? = null
     private var channel: WifiP2pManager.Channel? = null
-    private var peers: MutableList<WifiP2pDevice> = mutableListOf()
-
-    init {
-        wifiP2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
-        channel = wifiP2pManager?.initialize(context, Looper.getMainLooper(), null)
+    private val receiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val action = intent.action
+            if (WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION == action) {
+                wifiP2pManager?.requestPeers(channel) { peerList ->
+                    peers.clear()
+                    peers.addAll(peerList.deviceList)
+                }
+            }
+        }
     }
+
+    private var isReceiverRegistered = false
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "isWiFiDirectAvailable" -> {
-                result.success(wifiP2pManager != null)
-            }
-            "discoverWiFiDirectPeers" -> {
+            "startWiFiDirectDiscovery" -> {
+                if (!isReceiverRegistered) {
+                    val intentFilter = android.content.IntentFilter().apply {
+                        addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
+                    }
+                    context.registerReceiver(receiver, intentFilter)
+                    isReceiverRegistered = true
+                }
                 discoverPeers(result)
+            }
+            "getWiFiDirectPeers" -> {
+                val peerList = peers.map { device ->
+                    mapOf(
+                        "id" to device.deviceAddress,
+                        "name" to (device.deviceName ?: "Unknown"),
+                        "type" to "wifi-direct",
+                        "status" to device.status
+                    )
+                }
+                result.success(peerList)
             }
             "connectWiFiDirect" -> {
                 val peerId = call.argument<String>("peerId")
@@ -34,6 +57,9 @@ class WiFiDirectHandler(private val context: Context) : MethodChannel.MethodCall
                 } else {
                     result.error("INVALID_ARGUMENT", "peerId is required", null)
                 }
+            }
+            "isWiFiDirectAvailable" -> {
+                result.success(wifiP2pManager != null)
             }
             else -> {
                 result.notImplemented()
@@ -44,8 +70,7 @@ class WiFiDirectHandler(private val context: Context) : MethodChannel.MethodCall
     private fun discoverPeers(result: MethodChannel.Result) {
         wifiP2pManager?.discoverPeers(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
-                // Peers will be available via broadcast receiver
-                result.success(emptyList<Map<String, Any>>())
+                result.success(true)
             }
 
             override fun onFailure(reasonCode: Int) {

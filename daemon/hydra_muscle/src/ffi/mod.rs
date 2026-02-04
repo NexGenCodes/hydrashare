@@ -4,18 +4,25 @@ use std::ffi::{CString, CStr};
 use std::os::raw::c_char;
 use once_cell::sync::Lazy;
 use serde::{Serialize, Deserialize};
-use tracing::{debug, info};
+use tracing::info;
 use crate::core::engine::EngineState;
 use crate::db::Database;
 use crate::mesh::{MeshNetwork, orchestrator::Orchestrator};
 use crate::discovery::DiscoveryService;
 use crate::transfer::TransferManager;
 use crate::auth::{Identity, service::AuthService};
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
+use tracing::error;
+use uuid::Uuid;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-pub static EVENT_QUEUE: Lazy<Mutex<VecDeque<String>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
+pub static EVENT_QUEUE: Lazy<Mutex<VecDeque<Vec<u8>>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 static ENGINE: Lazy<Arc<Mutex<Option<EngineState>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+use crate::system::runtime::RUNTIME;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Archive, RkyvDeserialize, RkyvSerialize, Serialize, Deserialize, Debug, Clone)]
+#[archive(check_bytes)]
+#[archive_attr(derive(Debug))]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DaemonEvent {
     PeerDiscovered {
@@ -41,6 +48,12 @@ pub enum DaemonEvent {
         peer_id: String,
         pin: String,
     },
+    TransferOffer {
+        peer_id: String,
+        transfer_id: String,
+        file_name: String,
+        thumbnail: Option<String>,
+    },
     LogMessage {
         level: String,
         message: String,
@@ -49,9 +62,29 @@ pub enum DaemonEvent {
         pin: String,
         session_key: String,
     },
+    QrPayloadGenerated {
+        payload_json: String,
+    },
+    SettingReported {
+        key: String,
+        value: String,
+    },
+    SessionCodeGenerated {
+        code: String,
+    },
+    SignalingStarted {
+        id: String,
+    },
+    CodeGenerated {
+        key: String,
+        pin: Option<String>,
+        ip: String,
+    },
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Archive, RkyvDeserialize, RkyvSerialize, Deserialize, Debug)]
+#[archive(check_bytes)]
+#[archive_attr(derive(Debug))]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DaemonCommand {
     Init {
@@ -60,24 +93,39 @@ pub enum DaemonCommand {
     StartEngine,
     StopEngine,
     SendFile {
+        peer_id: String,
         file_path: String,
         dest_ip: String,
     },
-    AcceptFile {
-        offer_id: String,
-        dest_ip: String,
-    },
+    AcceptFile { offer_id: String, peer_id: String, dest_path: String },
+    CancelTransfer { transfer_id: String },
+    MarkChatAsRead { peer_id: String },
     RejectFile {
         offer_id: String,
         dest_ip: String,
     },
     GenerateCredentials,
+    GenerateQrPayload,
+    JoinSession { pin: String },
+    SetSettings {
+        key: String,
+        text: String,
+    },
+    GetSettings {
+        key: String,
+    },
+    GenerateSessionCode,
+    JoinSessionCode { text: String },
+    SetDeviceName { name: String },
+    StartDiscovery,
+    GenerateCode,
 }
 
 pub fn emit_event(event: DaemonEvent) {
     if let Ok(json) = serde_json::to_string(&event) {
+        let c_str = CString::new(json).expect("Failed to create CString");
         if let Ok(mut queue) = EVENT_QUEUE.lock() {
-            queue.push_back(json);
+            queue.push_back(c_str.into_bytes_with_nul());
         }
     }
 }
@@ -85,41 +133,111 @@ pub fn emit_event(event: DaemonEvent) {
 // --- FFI EXPORTS ---
 
 #[no_mangle]
-pub extern "C" fn poll_event() -> *mut c_char {
-    if let Ok(mut queue) = EVENT_QUEUE.lock() {
-        if let Some(event_json) = queue.pop_front() {
-            return CString::new(event_json).unwrap().into_raw();
+pub unsafe extern "C" fn poll_event() -> *mut c_char {
+    let result = std::panic::catch_unwind(|| {
+        if let Ok(mut queue) = EVENT_QUEUE.lock() {
+            if let Some(event_bytes) = queue.pop_front() {
+                return CString::from_vec_unchecked(event_bytes).into_raw();
+            }
+        }
+        std::ptr::null_mut()
+    });
+    match result {
+        Ok(ptr) => ptr,
+        Err(e) => {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() { s.to_string() }
+            else if let Some(s) = e.downcast_ref::<String>() { s.clone() }
+            else { "Unknown panic".to_string() };
+            eprintln!("❌ CRITICAL: poll_event panicked: {}", msg);
+            std::ptr::null_mut()
         }
     }
-    std::ptr::null_mut()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn start_engine(db_path_ptr: *const c_char) -> i32 {
+    let result = std::panic::catch_unwind(|| {
+        if db_path_ptr.is_null() { return -1; }
+        let db_path = CStr::from_ptr(db_path_ptr).to_string_lossy().into_owned();
+        handle_command(DaemonCommand::Init { data_dir: db_path })
+    });
+    match result {
+        Ok(res) => res,
+        Err(e) => {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "Unknown panic".to_string()
+            };
+            tracing::error!("❌ CRITICAL: Engine panicked during startup: {}", msg);
+            eprintln!("❌ CRITICAL: Engine panicked during startup: {}", msg);
+            -5
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn stop_engine() {
+    let result = std::panic::catch_unwind(|| {
+        handle_command(DaemonCommand::StopEngine);
+    });
+    if let Err(e) = result {
+        let msg = if let Some(s) = e.downcast_ref::<&str>() { s.to_string() }
+        else if let Some(s) = e.downcast_ref::<String>() { s.clone() }
+        else { "Unknown panic".to_string() };
+        eprintln!("❌ CRITICAL: stop_engine panicked: {}", msg);
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn free_event(ptr: *mut u8, len: u32) {
+    if !ptr.is_null() {
+        let _ = Box::from_raw(std::slice::from_raw_parts_mut(ptr, len as usize));
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
-    if !ptr.is_null() {
+    if ptr.is_null() { return; }
+    let _ = std::panic::catch_unwind(|| {
         let _ = CString::from_raw(ptr);
-    }
+    });
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn send_command(cmd_json: *const c_char) -> i32 {
-    if cmd_json.is_null() {
-        return -1;
-    }
-    
-    let c_str = CStr::from_ptr(cmd_json);
-    let r_str = c_str.to_string_lossy();
-    
-    debug!("📩 Received command: {}", r_str);
-    
-    let command: DaemonCommand = match serde_json::from_str(&r_str) {
-        Ok(cmd) => cmd,
-        Err(e) => {
-            tracing::error!("Failed to parse command: {}", e);
-            return -2;
-        }
-    };
+pub unsafe extern "C" fn send_command(ptr: *const u8, len: u32) -> i32 {
+    let result = std::panic::catch_unwind(|| {
+        if ptr.is_null() { return -1; }
+        let bytes = std::slice::from_raw_parts(ptr, len as usize);
+        
+        // Zero-copy deserialization with rkyv
+        let archived = match rkyv::check_archived_root::<DaemonCommand>(bytes) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::error!("Binary FFI: Validation failed: {:?}", e);
+                return -2;
+            }
+        };
 
+        let command: DaemonCommand = archived.deserialize(&mut rkyv::Infallible).unwrap();
+        handle_command(command)
+    });
+    match result {
+        Ok(res) => res,
+        Err(e) => {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() { s.to_string() }
+            else if let Some(s) = e.downcast_ref::<String>() { s.clone() }
+            else { "Unknown panic".to_string() };
+            eprintln!("❌ CRITICAL: send_command panicked: {}", msg);
+            -5
+        }
+    }
+}
+
+/// Handle a daemon command (used by both binary and JSON FFI)
+pub fn handle_command(command: DaemonCommand) -> i32 {
     match command {
         DaemonCommand::Init { data_dir } => {
             let data_path = std::path::Path::new(&data_dir);
@@ -141,9 +259,9 @@ pub unsafe extern "C" fn send_command(cmd_json: *const c_char) -> i32 {
                 None => Identity::generate(),
             };
 
-            let discovery = Arc::new(DiscoveryService::new(&my_id.peer_id, 5051, mesh.clone()));
-            let orchestrator = Arc::new(Orchestrator::new(mesh.clone(), discovery.clone()));
             let auth = Arc::new(AuthService::new(db.clone()));
+            let discovery = Arc::new(DiscoveryService::new(&my_id.peer_id, mesh.clone(), auth.clone()));
+            let orchestrator = Arc::new(Orchestrator::new(&my_id.peer_id, mesh.clone(), discovery.clone()));
 
             let mut engine = ENGINE.lock().unwrap();
             *engine = Some(EngineState::new(db, mesh, discovery, transfer, orchestrator, auth));
@@ -152,8 +270,16 @@ pub unsafe extern "C" fn send_command(cmd_json: *const c_char) -> i32 {
         DaemonCommand::StartEngine => {
             let engine = ENGINE.lock().unwrap();
             if let Some(state) = engine.as_ref() {
-                state.discovery.start();
-                state.orchestrator.start();
+                let orchestrator = state.orchestrator.clone();
+                let discovery = state.discovery.clone();
+                
+                // Spawn async start
+                RUNTIME.spawn(async move {
+                    let port = orchestrator.start().await.unwrap_or(0);
+                    discovery.start(orchestrator.clone(), port);
+                    crate::system::start_intelligence_loop();
+                    info!("📢 Discovery started on port {}", port);
+                });
                 info!("📢 Discovery and Orchestration started");
             } else {
                 return -4;
@@ -164,16 +290,147 @@ pub unsafe extern "C" fn send_command(cmd_json: *const c_char) -> i32 {
             *engine = None;
             info!("🛑 Engine stopped");
         }
-        DaemonCommand::SendFile { file_path, dest_ip } => {
+        DaemonCommand::SendFile { peer_id, file_path, dest_ip: _ } => {
             let engine = ENGINE.lock().unwrap();
             if let Some(state) = engine.as_ref() {
-                let transfer_manager = state.transfer.clone();
-                tokio::spawn(async move {
-                    let _ = transfer_manager.start_transfer("peer_id_placeholder".to_string(), file_path, dest_ip).await;
+                // Look up peer in mesh
+                let peer_info = state.mesh.get_peer(&peer_id);
+                
+                if let Some(info) = peer_info {
+                    let orchestrator = state.orchestrator.clone();
+                    let file_name = std::path::Path::new(&file_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let file_path_clone = file_path.clone();
+
+                    RUNTIME.spawn(async move {
+                        let transfer_id = Uuid::new_v4().to_string();
+                        
+                        // Generate thumbnail
+                        let thumbnail = crate::transfer::preview::PreviewGenerator::generate_thumbnail(&file_path_clone);
+
+                        // Register in orchestrator for when Accept comes back
+                        {
+                            let mut pending = orchestrator.pending_transfers.write().unwrap();
+                            pending.insert(transfer_id.clone(), file_path_clone);
+                        }
+
+                        // Send G2gTransferReq via Mesh
+                        let _ = orchestrator.send_to_peer(&info.peer_id, crate::mesh::orchestrator::MeshMessage::G2gTransferReq {
+                            target_peer_id: info.peer_id.clone(),
+                            file_name,
+                            transfer_id,
+                            thumbnail,
+                        }).await;
+                    });
+                } else {
+                    error!("❌ Peer not found in mesh: {}", peer_id);
+                    emit_event(DaemonEvent::LogMessage {
+                        level: "ERROR".to_string(),
+                        message: format!("Peer {} not found or not connected", peer_id),
+                    });
+                }
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::AcceptFile { offer_id, peer_id, dest_path } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let orchestrator = state.orchestrator.clone();
+                let _transfer_manager = state.transfer.clone();
+                let mesh = state.mesh.clone();
+                let peer_id_clone = peer_id.clone();
+                let offer_id_clone = offer_id.clone();
+                let dest_path_clone = dest_path.clone();
+
+                RUNTIME.spawn(async move {
+                    info!("✅ Accepting file offer {} from {}", offer_id_clone, peer_id_clone);
+                    
+                    // 1. Check for existing .part file and compute map
+                    let part_file = format!("{}.part", dest_path_clone);
+                    let delta_map = if std::path::Path::new(&part_file).exists() {
+                        crate::transfer::delta::DeltaHasher::compute_map(&part_file).ok()
+                    } else {
+                        None
+                    };
+
+                    // 2. Send G2gTransferAccept via Mesh
+                    let _ = orchestrator.send_to_peer(&peer_id_clone, crate::mesh::orchestrator::MeshMessage::G2gTransferAccept {
+                        transfer_id: offer_id_clone.clone(),
+                        delta_map: delta_map.clone(),
+                    }).await;
+
+                    // 3. Start QUIC server to receive
+                    let listen_port = orchestrator.get_port();
+                    
+                    // Retrieve shared key for authentication
+                    let mut key = [0u8; 32];
+                    if let Some(peer_info) = mesh.get_peer(&peer_id_clone) {
+                        if let Some(key_b64) = peer_info.shared_key {
+                            if let Ok(decoded) = STANDARD.decode(key_b64) {
+                                if decoded.len() == 32 {
+                                    key.copy_from_slice(&decoded);
+                                }
+                            }
+                        }
+                    }
+
+                    let _ = crate::quic::server::run_quic_receive(
+                        format!("0.0.0.0:{}", listen_port),
+                        dest_path_clone,
+                        0, // Expected size from offer
+                        0, // start_offset (placeholder)
+                        &key,
+                        0, // hash_output
+                        0, // throttle_ms
+                        0, // cancel_flag
+                        0, // progress_callback
+                        0, // consent_callback
+                        0, // user_data
+                        None, // tracker
+                        Some(offer_id_clone),
+                        delta_map,
+                        None, // local_priv_key
+                        None, // expected_peer_id
+                    ).await;
+                });
+            }
+        }
+        DaemonCommand::CancelTransfer { transfer_id } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let transfer_id_clone = transfer_id.clone();
+                let manager = state.transfer.clone();
+                let orchestrator = state.orchestrator.clone();
+                
+                RUNTIME.spawn(async move {
+                    // 1. Get peer ID before cancelling session state
+                    let peer_id = manager.get_peer_id(&transfer_id_clone).await;
+
+                    // 2. Mark locally as cancelled
+                    manager.cancel_session(&transfer_id_clone).await;
+                    
+                    // 3. Notify peer via mesh
+                    if let Some(peer_id) = peer_id {
+                        let _ = orchestrator.send_to_peer(&peer_id, crate::mesh::orchestrator::MeshMessage::G2gTransferCancel {
+                            transfer_id: transfer_id_clone,
+                        }).await;
+                    }
                 });
             } else {
                 return -4;
             }
+        }
+        DaemonCommand::MarkChatAsRead { peer_id } => {
+            info!("📖 Marking chat with {} as read", peer_id);
+            // This is primarily for the UI, but we could update DB here
+        }
+        DaemonCommand::RejectFile { offer_id: _offer_id, dest_ip: _dest_ip } => {
+            info!("❌ Rejecting file offer {} to {}", _offer_id, _dest_ip);
+            // Send MeshMessage::Reject
         }
         DaemonCommand::GenerateCredentials => {
             let engine = ENGINE.lock().unwrap();
@@ -184,8 +441,95 @@ pub unsafe extern "C" fn send_command(cmd_json: *const c_char) -> i32 {
                 return -4;
             }
         }
-        _ => {
-            info!("Command not yet implemented");
+        DaemonCommand::GenerateQrPayload => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let my_id = state.db.get_config("hydra_peer_id").unwrap_or(None).unwrap_or_else(|| "unknown".to_string());
+                let port = state.orchestrator.get_port();
+                let payload = state.auth.generate_qr_payload(&my_id, port);
+                let json = serde_json::to_string(&payload).unwrap_or_default();
+                emit_event(DaemonEvent::QrPayloadGenerated { payload_json: json });
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::JoinSession { pin } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                state.discovery.start_signaling(&pin, state.orchestrator.clone());
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::SetSettings { key, text } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                info!("⚙️ Setting: {} = {}", key, text);
+                let _ = state.db.set_config(&format!("setting_{}", key), &text);
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::GetSettings { key } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let value = state.db.get_config(&format!("setting_{}", key)).unwrap_or(None).unwrap_or_default();
+                emit_event(DaemonEvent::SettingReported { key, value });
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::GenerateSessionCode => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let code = state.discovery.generate_ldt_code(state.orchestrator.clone());
+                emit_event(DaemonEvent::SessionCodeGenerated { code });
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::JoinSessionCode { text } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                state.discovery.join_ldt_session(&text, state.orchestrator.clone());
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::SetDeviceName { name } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let _ = state.db.set_config("device_name", &name);
+                info!("🏷️ Device name set to: {}", name);
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::StartDiscovery => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let orchestrator = state.orchestrator.clone();
+                let discovery = state.discovery.clone();
+                RUNTIME.spawn(async move {
+                    let port = orchestrator.start().await.unwrap_or(0);
+                    discovery.start(orchestrator, port);
+                    crate::system::start_intelligence_loop();
+                    info!("📢 Discovery started via START_DISCOVERY on port {}", port);
+                });
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::GenerateCode => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let (pin, key) = state.auth.generate_credentials();
+                let ip = state.auth.get_local_ips().first().cloned().unwrap_or_else(|| "127.0.0.1".to_string());
+                emit_event(DaemonEvent::CodeGenerated { key, pin: Some(pin.clone()), ip: ip.clone() });
+                info!("🔑 Generated pair code: {} @ {}", pin, ip);
+            } else {
+                return -4;
+            }
         }
     }
     

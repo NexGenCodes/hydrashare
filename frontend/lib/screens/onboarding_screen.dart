@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'network_selection_screen.dart';
+import 'role_selection_screen.dart';
+import '../widgets/adaptive_layout.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -14,182 +15,86 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   final List<OnboardingItem> _items = [
     OnboardingItem(
-      title: 'Serverless P2P',
+      title: 'Simple File Sharing',
       description:
-          'Transfer files directly between devices without any central server. Privacy by design.',
-      icon: Icons.security_rounded,
-      color: Colors.blueAccent,
+          'HydraShare makes it easy to send files between devices without any external servers.',
+      icon: Icons.auto_awesome_rounded,
     ),
     OnboardingItem(
-      title: 'Multi-Path Speed',
+      title: 'Lightning Fast',
       description:
-          'Automatically uses the fastest path: USB, Ethernet, WiFi, or Bluetooth.',
-      icon: Icons.speed_rounded,
-      color: Colors.purpleAccent,
-    ),
-    OnboardingItem(
-      title: 'Zero Latency',
-      description:
-          'Optimized for speed and minimal resource usage. Your data stays local.',
+          'Utilize your local network for the fastest possible transfer speeds.',
       icon: Icons.bolt_rounded,
-      color: Colors.orangeAccent,
+    ),
+    OnboardingItem(
+      title: 'Private & Secure',
+      description:
+          'Your data never leaves your network. Direct device-to-device encryption included.',
+      icon: Icons.security_rounded,
     ),
   ];
 
   @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Stack(
+    final theme = Theme.of(context);
+
+    return AdaptiveLayout(
+      showAppBar: false,
+      padding: EdgeInsets.zero,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Background Gradient
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF100d20), Color(0xFF1E1B2E)],
-              ),
+          Expanded(
+            child: PageView.builder(
+              controller: _pageController,
+              onPageChanged: (index) => setState(() => _currentPage = index),
+              itemCount: _items.length,
+              itemBuilder: (context, index) {
+                return _buildPage(_items[index], theme);
+              },
             ),
           ),
-
-          // Content
-          Column(
-            children: [
-              Expanded(
-                child: PageView.builder(
-                  controller: _pageController,
-                  onPageChanged: (index) {
-                    setState(() {
-                      _currentPage = index;
-                    });
-                  },
-                  itemCount: _items.length,
-                  itemBuilder: (context, index) {
-                    return _buildPage(_items[index]);
-                  },
-                ),
-              ),
-
-              // Footer
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 48,
-                ),
-                child: Column(
-                  children: [
-                    // Indicators
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(
-                        _items.length,
-                        (index) => _buildIndicator(index == _currentPage),
-                      ),
-                    ),
-                    const SizedBox(height: 48),
-
-                    // Buttons
-                    if (_currentPage == _items.length - 1)
-                      ElevatedButton(
-                        onPressed: () {
-                          Navigator.pushReplacement(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  const NetworkSelectionScreen(),
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF100d20),
-                          minimumSize: const Size(double.infinity, 64),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          elevation: 8,
-                        ),
-                        child: const Text(
-                          'Get Started',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      )
-                    else
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          TextButton(
-                            onPressed: () {
-                              _pageController.jumpToPage(_items.length - 1);
-                            },
-                            child: const Text(
-                              'Skip',
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                          ),
-                          ElevatedButton(
-                            onPressed: () {
-                              _pageController.nextPage(
-                                duration: const Duration(milliseconds: 300),
-                                curve: Curves.easeInOut,
-                              );
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.deepPurpleAccent,
-                              foregroundColor: Colors.white,
-                              minimumSize: const Size(120, 56),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            child: const Text('Next'),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          _buildFooter(theme),
         ],
       ),
     );
   }
 
-  Widget _buildPage(OnboardingItem item) {
+  Widget _buildPage(OnboardingItem item, ThemeData theme) {
     return Padding(
-      padding: const EdgeInsets.all(48),
+      padding: const EdgeInsets.all(40.0),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: item.color.withOpacity(0.1),
+              color: theme.colorScheme.primary.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(item.icon, size: 100, color: item.color),
+            child: Icon(item.icon, size: 100, color: theme.colorScheme.primary),
           ),
           const SizedBox(height: 64),
           Text(
             item.title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 32,
+            style: theme.textTheme.headlineMedium?.copyWith(
               fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onSurface,
             ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
           Text(
             item.description,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 18,
-              height: 1.5,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              color: theme.colorScheme.onSurface.withOpacity(0.6),
+              height: 1.6,
             ),
             textAlign: TextAlign.center,
           ),
@@ -198,14 +103,55 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 
-  Widget _buildIndicator(bool isActive) {
+  Widget _buildFooter(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.all(40.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            children: List.generate(
+              _items.length,
+              (index) => _buildIndicator(index == _currentPage, theme),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (_currentPage < _items.length - 1) {
+                _pageController.nextPage(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                );
+              } else {
+                Navigator.of(context).pushReplacement(
+                  MaterialPageRoute(
+                    builder: (context) => const RoleSelectionScreen(),
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+            ),
+            child: Text(
+              _currentPage < _items.length - 1 ? 'Next' : 'Get Started',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIndicator(bool isActive, ThemeData theme) {
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      margin: const EdgeInsets.symmetric(horizontal: 4),
+      duration: const Duration(milliseconds: 150),
+      margin: const EdgeInsets.only(right: 8),
       height: 8,
       width: isActive ? 24 : 8,
       decoration: BoxDecoration(
-        color: isActive ? Colors.white : Colors.white38,
+        color: isActive
+            ? theme.colorScheme.primary
+            : theme.colorScheme.primary.withOpacity(0.2),
         borderRadius: BorderRadius.circular(4),
       ),
     );
@@ -216,12 +162,10 @@ class OnboardingItem {
   final String title;
   final String description;
   final IconData icon;
-  final Color color;
 
   OnboardingItem({
     required this.title,
     required this.description,
     required this.icon,
-    required this.color,
   });
 }

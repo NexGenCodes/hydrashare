@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../services/daemon_service.dart';
 import '../providers/theme_provider.dart';
+import '../services/daemon_service.dart';
+import '../widgets/adaptive_layout.dart';
 
 class SettingsScreen extends StatefulWidget {
   final DaemonService daemonService;
+
   const SettingsScreen({super.key, required this.daemonService});
 
   @override
@@ -12,148 +14,104 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  double _maxFileSizeGB = 0; // 0 = Unlimited
-  double _autoAcceptLimitMB = 10; // Default 10MB
+  final ScrollController _scrollController = ScrollController();
 
   @override
-  void initState() {
-    super.initState();
-    // TODO: Load current max file size from storage if needed
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final theme = Theme.of(context);
+
+    return AdaptiveLayout(
+      title: 'Settings',
+      scrollController: _scrollController,
+      maxWidth: 600,
+      child: Column(
         children: [
-          _buildSectionHeader('Preference'),
-          Consumer<ThemeProvider>(
-            builder: (context, themeProvider, child) {
-              return ListTile(
-                leading: Icon(
-                  themeProvider.themeMode == ThemeMode.dark
-                      ? Icons.dark_mode
-                      : Icons.light_mode,
-                  color: Colors.deepPurpleAccent,
-                ),
-                title: const Text('Theme Mode'),
-                subtitle: Text(
-                  themeProvider.themeMode == ThemeMode.system
-                      ? 'System Default'
-                      : themeProvider.themeMode == ThemeMode.dark
-                      ? 'Dark'
-                      : 'Light',
-                ),
-                trailing: Switch(
-                  value: themeProvider.themeMode == ThemeMode.dark,
-                  onChanged: (value) => themeProvider.toggleTheme(),
-                  activeThumbColor: Colors.deepPurpleAccent,
-                ),
-              );
-            },
-          ),
-          const Divider(height: 40, color: Colors.white10),
-          _buildSectionHeader('Transfers'),
-          ListTile(
-            leading: const Icon(Icons.speed, color: Colors.blueAccent),
-            title: const Text('Max Incoming File Size'),
-            subtitle: Text(
-              _maxFileSizeGB == 0
-                  ? 'Unlimited'
-                  : '${_maxFileSizeGB.toInt()} GB',
+          _buildSection(theme, 'Appearance', [
+            ListTile(
+              leading: const Icon(Icons.palette_outlined),
+              title: const Text('Theme Mode'),
+              subtitle: Text(
+                themeProvider.themeMode == ThemeMode.light
+                    ? 'Light'
+                    : themeProvider.themeMode == ThemeMode.dark
+                    ? 'Dark'
+                    : 'System',
+              ),
+              trailing: Switch(
+                value: themeProvider.themeMode == ThemeMode.dark,
+                onChanged: (_) => themeProvider.toggleTheme(),
+              ),
+              onTap: () => themeProvider.toggleTheme(),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Slider(
-              value: _maxFileSizeGB,
-              min: 0,
-              max: 100,
-              divisions: 20,
-              label: _maxFileSizeGB == 0
-                  ? 'Unlimited'
-                  : '${_maxFileSizeGB.toInt()} GB',
-              activeColor: Colors.deepPurpleAccent,
-              onChanged: (value) {
-                setState(() {
-                  _maxFileSizeGB = value;
-                });
-                // Convert GB to bytes and send to daemon
-                final bytes = (value * 1024 * 1024 * 1024).toInt();
-                widget.daemonService.setMaxFileSize(bytes);
+          ]),
+          const SizedBox(height: 32),
+          _buildSection(theme, 'Network', [
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Daemon Status'),
+              subtitle: Text(
+                DaemonService().isConnected ? 'Connected' : 'Disconnected',
+              ),
+              trailing: Container(
+                width: 12,
+                height: 12,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: DaemonService().isConnected
+                      ? Colors.green
+                      : Colors.red,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.refresh_rounded),
+              title: const Text('Restart Daemon'),
+              onTap: () {
+                // TODO: Implement restart
               },
             ),
-          ),
-          const Divider(height: 40, color: Colors.white10),
-          _buildSectionHeader('Automated Governance'),
-          ListTile(
-            leading: const Icon(
-              Icons.auto_awesome_rounded,
-              color: Colors.amberAccent,
+          ]),
+          const SizedBox(height: 32),
+          _buildSection(theme, 'About', [
+            const ListTile(
+              leading: Icon(Icons.code_rounded),
+              title: Text('Version'),
+              trailing: Text('1.0.0'),
             ),
-            title: const Text('Auto-accept Limit'),
-            subtitle: Text(
-              _autoAcceptLimitMB == 0
-                  ? 'Disabled'
-                  : '${_autoAcceptLimitMB.toInt()} MB',
+            const ListTile(
+              leading: Icon(Icons.description_outlined),
+              title: Text('Licenses'),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
-            child: Slider(
-              value: _autoAcceptLimitMB,
-              min: 0,
-              max: 500,
-              divisions: 10,
-              label: _autoAcceptLimitMB == 0
-                  ? 'Disabled'
-                  : '${_autoAcceptLimitMB.toInt()} MB',
-              activeColor: Colors.amberAccent,
-              onChanged: (value) {
-                setState(() {
-                  _autoAcceptLimitMB = value;
-                });
-                // TODO: Send to daemon
-              },
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16.0),
-            child: Text(
-              'Files below this size from trusted peers will be accepted automatically.',
-              style: TextStyle(color: Colors.white30, fontSize: 12),
-            ),
-          ),
-          const Divider(height: 40, color: Colors.white10),
-          _buildSectionHeader('About'),
-          const ListTile(
-            leading: Icon(Icons.info_outline, color: Colors.grey),
-            title: Text('HydraShare'),
-            subtitle: Text('v1.0.0 - Advanced Agentic Edition'),
-          ),
+          ]),
         ],
       ),
     );
   }
 
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-      child: Text(
-        title.toUpperCase(),
-        style: const TextStyle(
-          color: Colors.deepPurpleAccent,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.2,
+  Widget _buildSection(ThemeData theme, String title, List<Widget> children) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Text(
+            title.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.2,
+            ),
+          ),
         ),
-      ),
+        Card(child: Column(children: children)),
+      ],
     );
   }
 }

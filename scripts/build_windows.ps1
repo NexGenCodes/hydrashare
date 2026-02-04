@@ -22,27 +22,11 @@ Write-Step "Preparing Windows Build Environment..."
 
 # Environment Setup
 $originalPath = $env:PATH
-$env:GOOS = "windows"
-$env:GOARCH = "amd64"
-$env:CGO_ENABLED = "1"
-
-# Ensure Strawberry GCC is used for Go CGO
-if (Test-Path "C:\Strawberry\c\bin\gcc.exe") {
-    $env:CC = "gcc"
-    if ($env:PATH -notlike "*C:\Strawberry\c\bin*") {
-        $env:PATH = "C:\Strawberry\c\bin;" + $env:PATH
-    }
-    Write-Info "Using Strawberry GCC for Go CGO"
-}
-else {
-    Write-Error-Custom "Strawberry GCC not found. It is required for CGO."
-    exit 1
-}
 
 # Verify tools
 Write-Step "Checking Dependencies..."
 $missing = @()
-foreach ($tool in "cargo", "go", "gcc") {
+foreach ($tool in "cargo") {
     if (!(Get-Command $tool -ErrorAction SilentlyContinue)) { $missing += $tool }
 }
 if ($missing.Count -gt 0) {
@@ -71,6 +55,13 @@ if (!(Test-Path $dllSrc)) {
 Copy-Item $dllSrc -Destination "$BIN_DIR\" -Force
 if (Test-Path $binSrc) {
     Copy-Item $binSrc -Destination "$BIN_DIR\" -Force
+}
+
+# ALSO copy to Flutter's Windows runner directory for development
+$runnerDir = "$PSScriptRoot\..\frontend\build\windows\x64\runner\Debug"
+if (Test-Path $runnerDir) {
+    Write-Info "Copying DLL to Flutter runner directory..."
+    Copy-Item $dllSrc -Destination "$runnerDir\" -Force
 }
 
 Write-Host "`n✅ Windows Build Successful! Artifacts in: $BIN_DIR" -ForegroundColor Green

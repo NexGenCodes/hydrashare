@@ -8,7 +8,6 @@ import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import 'qr_handshake_screen.dart';
 import 'qr_scanner_screen.dart';
-import 'manual_pairing_screen.dart';
 import '../widgets/warning_banner.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -22,6 +21,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Map<String, dynamic>? _selectedPeer;
+  final ScrollController _sidebarController = ScrollController();
 
   @override
   void initState() {
@@ -31,33 +31,52 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     });
   }
 
+  @override
+  void dispose() {
+    _sidebarController.dispose();
+    super.dispose();
+  }
+
   Future<void> _requestPermissions() async {
     await PermissionService().requestAllPermissions();
   }
 
-  // Removed _setupListeners, _updateTransfer, _removeTransfer
-  // Transfers now handled in ChatScreen
-
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return StreamBuilder<List<Map<String, dynamic>>>(
       stream: widget.daemonService.connectedPeers,
       initialData: widget.daemonService.currentPeers,
-      builder: (context, snapshot) {
-        final peers = snapshot.data ?? [];
+      builder: (context, connectedSnapshot) {
+        final connectedPeers = connectedSnapshot.data ?? [];
 
-        // Auto-navigation on total disconnect
-        if (peers.isEmpty && widget.daemonService.currentRole != 'none') {
-          // Disconnected state handled in-place on Home
-        }
+        return StreamBuilder<List<Map<String, dynamic>>>(
+          stream: widget.daemonService.discoveredPeers,
+          initialData: widget.daemonService.currentDiscoveredPeers,
+          builder: (context, discoveredSnapshot) {
+            final discoveredPeers = discoveredSnapshot.data ?? [];
 
-        if (Platform.isWindows) {
-          return _buildDesktopLayout(peers);
-        }
+            if (Platform.isWindows) {
+              return _buildDesktopLayout(
+                connectedPeers,
+                discoveredPeers,
+                theme,
+                isDark,
+              );
+            }
 
-        return WillPopScope(
-          onWillPop: _onWillPop,
-          child: _buildMobileLayout(peers),
+            return WillPopScope(
+              onWillPop: _onWillPop,
+              child: _buildMobileLayout(
+                connectedPeers,
+                discoveredPeers,
+                theme,
+                isDark,
+              ),
+            );
+          },
         );
       },
     );
@@ -72,13 +91,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('No', style: TextStyle(color: Colors.grey)),
+                child: Text(
+                  'No',
+                  style: TextStyle(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withOpacity(0.6),
+                  ),
+                ),
               ),
               TextButton(
                 onPressed: () => Navigator.of(context).pop(true),
-                child: const Text(
+                child: Text(
                   'Yes',
-                  style: TextStyle(color: Colors.deepPurple),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                 ),
               ),
             ],
@@ -87,152 +115,397 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         false;
   }
 
-  Widget _buildMobileLayout(List<Map<String, dynamic>> peers) {
+  Widget _buildMobileLayout(
+    List<Map<String, dynamic>> connectedPeers,
+    List<Map<String, dynamic>> discoveredPeers,
+    ThemeData theme,
+    bool isDark,
+  ) {
     return Scaffold(
-      appBar: _buildAppBar(),
+      appBar: _buildAppBar(theme, isDark),
       body: Container(
-        color: Colors.white,
+        decoration: BoxDecoration(color: theme.scaffoldBackgroundColor),
         child: SafeArea(
           child: CustomScrollView(
             slivers: [
               const SliverToBoxAdapter(child: WarningBanner()),
               if (widget.daemonService.currentRole == 'host')
-                SliverToBoxAdapter(child: _buildBroadcastItem()),
+                SliverToBoxAdapter(child: _buildBroadcastItem(theme, isDark)),
               if (widget.daemonService.currentRole == 'host')
-                const SliverToBoxAdapter(child: Divider()),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Divider(height: 1, color: theme.dividerColor),
+                  ),
+                ),
               SliverPadding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16.0,
-                  vertical: 8.0,
+                  horizontal: 24.0,
+                  vertical: 16.0,
                 ),
                 sliver: SliverToBoxAdapter(
                   child: Text(
                     'CONNECTED DEVICES',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontSize: 12,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurface.withOpacity(0.5),
                       fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
+                      letterSpacing: 1.5,
                     ),
                   ),
                 ),
               ),
-              if (peers.isEmpty)
-                const SliverFillRemaining(
+              if (connectedPeers.isEmpty && discoveredPeers.isEmpty)
+                SliverFillRemaining(
                   hasScrollBody: false,
-                  child: Center(child: Text('Connecting...')),
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(40.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.radar_rounded,
+                            size: 64,
+                            color: theme.colorScheme.primary.withOpacity(0.2),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'No devices connected',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: theme.colorScheme.onSurface.withOpacity(
+                                0.5,
+                              ),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Devices in your network will appear here.',
+                            textAlign: TextAlign.center,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurface.withOpacity(
+                                0.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 )
-              else
+              else ...[
                 SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (context, index) => _buildContactItem(peers[index]),
-                    childCount: peers.length,
+                    (context, index) =>
+                        _buildContactItem(connectedPeers[index], theme, isDark),
+                    childCount: connectedPeers.length,
                   ),
                 ),
+                if (discoveredPeers.isNotEmpty) ...[
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(24, 32, 24, 16),
+                    sliver: SliverToBoxAdapter(
+                      child: Text(
+                        'NEARBY DEVICES',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurface.withOpacity(0.5),
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => _buildContactItem(
+                        discoveredPeers[index],
+                        theme,
+                        isDark,
+                        isDiscovered: true,
+                      ),
+                      childCount: discoveredPeers.length,
+                    ),
+                  ),
+                ],
+              ],
             ],
           ),
         ),
       ),
-      floatingActionButton: _buildAddDeviceFAB(),
+      floatingActionButton: _buildAddDeviceFAB(theme),
     );
   }
 
-  Widget _buildDesktopLayout(List<Map<String, dynamic>> peers) {
+  Widget _buildDesktopLayout(
+    List<Map<String, dynamic>> connectedPeers,
+    List<Map<String, dynamic>> discoveredPeers,
+    ThemeData theme,
+    bool isDark,
+  ) {
     return Scaffold(
       body: Row(
         children: [
           // Sidebar
           Container(
-            width: 300,
-            color: Colors.grey[100],
+            width: 320,
+            decoration: BoxDecoration(
+              color: theme.cardColor,
+              border: Border(
+                right: BorderSide(color: theme.dividerColor, width: 1),
+              ),
+            ),
             child: Column(
               children: [
-                _buildAppBar(isDesktop: true),
+                _buildAppBar(theme, isDark, isDesktop: true),
                 const WarningBanner(),
                 if (widget.daemonService.currentRole == 'host')
-                  _buildBroadcastItem(),
-                const Divider(height: 1),
+                  _buildBroadcastItem(theme, isDark),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Divider(height: 1, color: theme.dividerColor),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+                  child: Row(
+                    children: [
+                      Text(
+                        'DEVICES',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurface.withOpacity(0.5),
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (connectedPeers.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            connectedPeers.length.toString(),
+                            style: TextStyle(
+                              color: theme.colorScheme.primary,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
                 Expanded(
-                  child: ListView.builder(
-                    itemCount: peers.length,
-                    itemBuilder: (context, index) => _buildContactItem(
-                      peers[index],
-                      isSelected:
-                          _selectedPeer != null &&
-                          (_selectedPeer!['ip'] ?? _selectedPeer!['dest_ip']) ==
-                              (peers[index]['ip'] ?? peers[index]['dest_ip']),
-                      onTap: () => setState(() => _selectedPeer = peers[index]),
+                  child: Scrollbar(
+                    controller: _sidebarController,
+                    thumbVisibility: false,
+                    thickness: 6,
+                    radius: const Radius.circular(3),
+                    child: ListView(
+                      controller: _sidebarController,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      children: [
+                        ...connectedPeers.map(
+                          (peer) => _buildContactItem(
+                            peer,
+                            theme,
+                            isDark,
+                            isSelected:
+                                _selectedPeer != null &&
+                                (_selectedPeer!['ip'] ??
+                                        _selectedPeer!['dest_ip']) ==
+                                    (peer['ip'] ?? peer['dest_ip']),
+                            onTap: () => setState(() => _selectedPeer = peer),
+                          ),
+                        ),
+                        if (discoveredPeers.isNotEmpty) ...[
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 24, 12, 8),
+                            child: Text(
+                              'NEARBY',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurface.withOpacity(
+                                  0.5,
+                                ),
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.2,
+                              ),
+                            ),
+                          ),
+                          ...discoveredPeers.map(
+                            (peer) => _buildContactItem(
+                              peer,
+                              theme,
+                              isDark,
+                              isDiscovered: true,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
+                _buildSidebarFooter(theme, isDark),
               ],
             ),
           ),
           // Main Chat Area
           Expanded(
-            child: _selectedPeer == null
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.chat_bubble_outline,
-                          size: 64,
-                          color: Colors.grey[300],
-                        ),
-                        const SizedBox(height: 16),
-                        const Text(
-                          'Select a device to start chatting',
-                          style: TextStyle(color: Colors.grey, fontSize: 18),
-                        ),
-                      ],
+            child: Container(
+              color: theme.scaffoldBackgroundColor,
+              child: _selectedPeer == null
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(32),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary.withOpacity(
+                                0.05,
+                              ),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.chat_bubble_outline_rounded,
+                              size: 80,
+                              color: theme.colorScheme.primary.withOpacity(0.2),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'Seamless File Sharing',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.onSurface.withOpacity(
+                                0.8,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Select a device to start chatting and sharing files',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurface.withOpacity(
+                                0.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ChatScreen(
+                      key: ValueKey(
+                        _selectedPeer!['ip'] ?? _selectedPeer!['dest_ip'],
+                      ),
+                      peer: _selectedPeer!,
+                      daemonService: widget.daemonService,
                     ),
-                  )
-                : ChatScreen(
-                    key: ValueKey(
-                      _selectedPeer!['ip'] ?? _selectedPeer!['dest_ip'],
-                    ),
-                    peer: _selectedPeer!,
-                    daemonService: widget.daemonService,
-                  ),
+            ),
           ),
         ],
       ),
-      floatingActionButton: _buildAddDeviceFAB(),
+      floatingActionButton: _buildAddDeviceFAB(theme),
     );
   }
 
-  FloatingActionButton _buildAddDeviceFAB() {
+  Widget _buildSidebarFooter(ThemeData theme, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: theme.dividerColor)),
+      ),
+      child: InkWell(
+        onTap: _showAddDeviceModal,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primary,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: theme.colorScheme.primary.withOpacity(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: const Center(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add_rounded, color: Colors.white, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'ADD DEVICE',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  FloatingActionButton _buildAddDeviceFAB(ThemeData theme) {
+    if (Platform.isWindows) return const FloatingActionButton(onPressed: null);
     return FloatingActionButton.extended(
       onPressed: _showAddDeviceModal,
       label: const Text('Add Device'),
       icon: const Icon(Icons.add_rounded),
-      backgroundColor: Colors.deepPurple,
+      backgroundColor: theme.colorScheme.primary,
       foregroundColor: Colors.white,
     );
   }
 
   void _showAddDeviceModal() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     showModalBottomSheet(
       context: context,
+      backgroundColor: theme.cardColor,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
       builder: (context) => Container(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 40),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Add New Device',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: theme.dividerColor,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 32),
+            Text(
+              'Add New Device',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 32),
             _buildModalOption(
-              icon: Icons.qr_code_scanner_rounded,
+              icon: Icons.qr_code_2_rounded,
               title: 'Create Invitation',
-              subtitle: 'Generate QR/PIN for a nearby friend',
-              color: Colors.deepPurple,
+              subtitle: 'Show a QR code for local pairing',
+              color: Colors.blueAccent,
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -243,36 +516,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   ),
                 );
               },
+              isDark: isDark,
             ),
             const SizedBox(height: 16),
             _buildModalOption(
-              icon: Icons.vpn_key_rounded,
-              title: 'Join Friendship',
-              subtitle: 'Enter PIN or Locator Token from a friend',
-              color: Colors.teal,
+              icon: Icons.qr_code_scanner_rounded,
+              title: 'Join Network',
+              subtitle: 'Scan a friend\'s QR code or enter PIN',
+              color: Colors.cyanAccent,
               onTap: () {
                 Navigator.pop(context);
-                // On desktop, go direct to PIN. On mobile, scanner.
-                if (Platform.isWindows ||
-                    Platform.isMacOS ||
-                    Platform.isLinux) {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ManualPairingScreen(),
-                    ),
-                  );
-                } else {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const QrScannerScreen(),
-                    ),
-                  );
-                }
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const QrScannerScreen(),
+                  ),
+                );
               },
+              isDark: isDark,
             ),
-            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -285,52 +547,78 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     required String subtitle,
     required Color color,
     required VoidCallback onTap,
+    required bool isDark,
   }) {
-    return ListTile(
+    final theme = Theme.of(context);
+    return InkWell(
       onTap: onTap,
-      leading: Container(
-        padding: const EdgeInsets.all(12),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          shape: BoxShape.circle,
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.dividerColor),
         ),
-        child: Icon(icon, color: color),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: theme.colorScheme.onSurface.withOpacity(0.6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: theme.colorScheme.onSurface.withOpacity(0.3),
+            ),
+          ],
+        ),
       ),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-      subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
     );
   }
 
-  AppBar _buildAppBar({bool isDesktop = false}) {
+  AppBar _buildAppBar(ThemeData theme, bool isDark, {bool isDesktop = false}) {
     return AppBar(
       title: Text(
         'HydraShare',
         style: TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: isDesktop ? 20 : 24,
-          color: Colors.black87,
+          fontWeight: FontWeight.w900,
+          fontSize: isDesktop ? 22 : 24,
+          color: theme.colorScheme.primary,
+          letterSpacing: -0.5,
         ),
       ),
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.transparent,
       elevation: 0,
       centerTitle: isDesktop,
       actions: [
-        if (widget.daemonService.currentRole == 'host')
-          IconButton(
-            icon: const Icon(Icons.person_add_alt_1_outlined),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                      QrHandshakeScreen(daemonService: widget.daemonService),
-                ),
-              );
-            },
-          ),
         IconButton(
-          icon: const Icon(Icons.settings_outlined),
+          icon: Icon(
+            Icons.settings_outlined,
+            color: theme.colorScheme.onSurface.withOpacity(0.8),
+          ),
           onPressed: () {
             Navigator.push(
               context,
@@ -341,34 +629,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             );
           },
         ),
-        // Theme Toggler
         Consumer<ThemeProvider>(
           builder: (context, themeProvider, child) {
             return IconButton(
               icon: Icon(
                 themeProvider.themeMode == ThemeMode.dark
-                    ? Icons.light_mode
-                    : Icons.dark_mode,
+                    ? Icons.light_mode_rounded
+                    : Icons.dark_mode_rounded,
+                color: theme.colorScheme.onSurface.withOpacity(0.8),
               ),
               onPressed: () => themeProvider.toggleTheme(),
             );
           },
         ),
+        const SizedBox(width: 8),
       ],
     );
   }
 
-  Widget _buildBroadcastItem() {
+  Widget _buildBroadcastItem(ThemeData theme, bool isDark) {
     return ListTile(
-      leading: const CircleAvatar(
-        backgroundColor: Colors.deepPurple,
-        child: Icon(Icons.campaign_rounded, color: Colors.white),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      leading: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary.withOpacity(0.1),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.campaign_rounded, color: theme.colorScheme.primary),
       ),
       title: const Text(
-        'Broadcast Message',
+        'Broadcast',
         style: TextStyle(fontWeight: FontWeight.bold),
       ),
-      subtitle: const Text('All guests'),
+      subtitle: const Text('Message everyone in the mesh'),
       selected: _selectedPeer != null && _selectedPeer!['ip'] == 'broadcast',
       onTap: () {
         if (Platform.isWindows) {
@@ -390,106 +684,167 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // Removed _pickAndSendFile as per requirement: move file sending to individual private chat
-
-  // Removed _buildTransferCard
-
   Widget _buildContactItem(
-    Map<String, dynamic> peer, {
+    Map<String, dynamic> peer,
+    ThemeData theme,
+    bool isDark, {
     bool isSelected = false,
+    bool isDiscovered = false,
     VoidCallback? onTap,
   }) {
     final ip = peer['ip'] ?? peer['dest_ip'] ?? 'Unknown IP';
     final name = peer['name'] ?? 'Nearby Device';
     final unreadCount = peer['unread_count'] ?? 0;
 
-    final id = peer['id'] ?? '...';
-    final shortId = id.length > 8 ? id.substring(0, 8) : id;
-
-    return ListTile(
-      selected: isSelected,
-      selectedTileColor: Colors.deepPurple.withOpacity(0.05),
-      leading: Badge(
-        label: Text(unreadCount.toString()),
-        isLabelVisible: unreadCount > 0,
-        backgroundColor: Colors.redAccent,
-        child: CircleAvatar(
-          backgroundColor: isSelected
-              ? Colors.deepPurple
-              : Colors.deepPurple.withOpacity(0.1),
-          child: Icon(
-            Icons.person,
-            color: isSelected ? Colors.white : Colors.deepPurple,
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        color: isSelected ? theme.colorScheme.primary.withOpacity(0.1) : null,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        selected: isSelected,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        leading: Badge(
+          label: Text(unreadCount.toString()),
+          isLabelVisible: unreadCount > 0,
+          backgroundColor: theme.colorScheme.secondary,
+          child: CircleAvatar(
+            backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
+            child: Icon(
+              Icons.devices_rounded,
+              color: theme.colorScheme.primary,
+              size: 20,
+            ),
           ),
         ),
+        title: Text(
+          name,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
+        subtitle: Text(
+          ip,
+          style: TextStyle(
+            fontSize: 12,
+            color: theme.colorScheme.onSurface.withOpacity(0.6),
+          ),
+        ),
+        trailing: isSelected
+            ? Icon(
+                Icons.chevron_right_rounded,
+                color: theme.colorScheme.primary,
+              )
+            : widget.daemonService.currentRole == 'host'
+            ? _buildAdminMenu(ip, peer)
+            : null,
+        onTap:
+            onTap ??
+            () {
+              if (isDiscovered) {
+                _showConnectToDiscoveredDialog(peer);
+                return;
+              }
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ChatScreen(
+                    peer: peer,
+                    daemonService: widget.daemonService,
+                  ),
+                ),
+              );
+            },
       ),
-      title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-      subtitle: Text('ID: $shortId'),
-      trailing: widget.daemonService.currentRole == 'host'
-          ? PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: Colors.grey),
-              onSelected: (value) async {
-                if (value == 'kick') {
-                  await widget.daemonService.disconnectPeer(ip);
-                } else if (value == 'ban') {
-                  final confirm = await _showConfirmDialog(
-                    'Ban Device?',
-                    'This device will be blocked permanently.',
-                  );
-                  if (confirm) await widget.daemonService.banPeer(ip);
-                } else if (value == 'mute') {
-                  final isMuted = peer['is_muted'] ?? false;
-                  await widget.daemonService.mutePeer(ip, !isMuted);
-                }
-              },
-              itemBuilder: (context) {
-                final isMuted = peer['is_muted'] ?? false;
-                return [
-                  const PopupMenuItem(
-                    value: 'kick',
-                    child: ListTile(
-                      leading: Icon(Icons.exit_to_app, color: Colors.orange),
-                      title: Text('Kick Device'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  const PopupMenuItem(
-                    value: 'ban',
-                    child: ListTile(
-                      leading: Icon(Icons.block, color: Colors.red),
-                      title: Text('Ban Device'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  PopupMenuItem(
-                    value: 'mute',
-                    child: ListTile(
-                      leading: Icon(
-                        isMuted ? Icons.volume_up : Icons.volume_off,
-                        color: Colors.grey,
-                      ),
-                      title: Text(isMuted ? 'Unmute' : 'Mute'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                ];
-              },
-            )
-          : Platform.isWindows
-          ? null
-          : const Icon(Icons.chevron_right, color: Colors.grey),
-      onTap:
-          onTap ??
-          () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) =>
-                    ChatScreen(peer: peer, daemonService: widget.daemonService),
-              ),
-            );
-          },
     );
+  }
+
+  Widget _buildAdminMenu(String ip, Map<String, dynamic> peer) {
+    return PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert_rounded, color: Colors.grey, size: 20),
+      onSelected: (value) async {
+        if (value == 'kick') {
+          await widget.daemonService.disconnectPeer(ip);
+        } else if (value == 'ban') {
+          final confirm = await _showConfirmDialog(
+            'Ban Device?',
+            'This device will be blocked permanently.',
+          );
+          if (confirm) await widget.daemonService.banPeer(ip);
+        }
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'kick',
+          child: ListTile(
+            leading: Icon(Icons.exit_to_app_rounded, color: Colors.orange),
+            title: Text('Kick Device'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'ban',
+          child: ListTile(
+            leading: Icon(Icons.block_rounded, color: Colors.red),
+            title: Text('Ban Device'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showConnectToDiscoveredDialog(Map<String, dynamic> peer) async {
+    final ip = peer['ip'] ?? peer['dest_ip'] ?? 'Unknown';
+    final name = peer['name'] ?? 'Nearby Device';
+
+    final confirm =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Connect to Device?'),
+            content: Text(
+              'Do you want to connect to $name ($ip)?\nYou will need to enter the 6-digit PIN shown on their screen.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(
+                  'Connect',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (confirm) {
+      if (!mounted) return;
+      // In a unified flow, "connecting" to a discovered peer means
+      // entering their PIN. We'll navigate to the ManualPairingScreen
+      // and potentially pre-fill the IP if the backend supported it,
+      // but JOIN_SESSION usually only needs the PIN for discovery.
+
+      // For now, let's just go to manual pairing screen
+      // but in the future we could pass the IP to skip discovery.
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) =>
+              const QrScannerScreen(), // Scanners permit PIN entry too
+        ),
+      );
+    }
   }
 
   Future<bool> _showConfirmDialog(String title, String content) async {

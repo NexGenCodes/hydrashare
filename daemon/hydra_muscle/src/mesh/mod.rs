@@ -18,6 +18,7 @@ pub struct MeshPeer {
     pub info: PeerInfo,
     pub status: PeerStatus,
     pub session_id: Option<u32>,
+    pub bluetooth_addr: Option<u64>,
 }
 
 pub struct MeshNetwork {
@@ -39,6 +40,7 @@ impl MeshNetwork {
         } else {
             debug!("New peer discovered in mesh: {}", info.peer_id);
             peers.insert(info.peer_id.clone(), MeshPeer {
+                bluetooth_addr: info.bt_addr,
                 info,
                 status: PeerStatus::Online,
                 session_id: None,

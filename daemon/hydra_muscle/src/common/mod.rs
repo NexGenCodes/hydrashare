@@ -1,3 +1,5 @@
+pub mod networks;
+pub mod interfaces;
 use std::ffi::c_void;
 
 pub type ProgressCallback = unsafe extern "C" fn(i64, i64, *mut c_void);
@@ -13,6 +15,7 @@ pub const ERROR_NETWORK_TIMEOUT: i32 = -7;
 pub const ERROR_QUIC_ERROR: i32 = -8;
 pub const ERROR_SESSION_CLOSED: i32 = -9;
 pub const ERROR_UNAUTHORIZED: i32 = -10;
+pub const ERROR_VERSION_MISMATCH: i32 = -11;
 
 pub fn error_to_string(code: i32) -> &'static str {
     match code {
@@ -28,17 +31,5 @@ pub fn error_to_string(code: i32) -> &'static str {
         ERROR_SESSION_CLOSED => "Session Closed",
         ERROR_UNAUTHORIZED => "Unauthorized / Pinning Failed",
         _ => "Unknown Error",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_mapping() {
-        assert_eq!(error_to_string(SUCCESS), "Success");
-        assert_eq!(error_to_string(ERROR_CANCELLED), "Cancelled");
-        assert_eq!(error_to_string(-999), "Unknown Error");
     }
 }

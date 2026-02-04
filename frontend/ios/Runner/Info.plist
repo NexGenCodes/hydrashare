@@ -56,6 +56,10 @@
 		<key>NSBonjourServices</key>
 		<array>
 			<string>_hydra._tcp</string>
+            <string>_hydra-share._tcp</string>
+            <string>_hydra-share._udp</string>
 		</array>
+        <key>NSLocalNetworkUsageDescription</key>
+        <string>HydraShare uses the local network to discover and connect to nearby devices via Bonjour and Multipeer Connectivity.</string>
 	</dict>
 </plist>

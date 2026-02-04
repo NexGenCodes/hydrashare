@@ -1,122 +1,106 @@
-# Future Enhancements (TODO)
+# Future Enhancements Roadmap
 
-This document tracks features that are intentionally deferred for future implementation.
+This document tracks prioritized features for future implementation, ordered by importance.
 
-## 🚀 Immediate Priorities (Phase 4)
+## 🚧 Tier 2: Active Development (Phase 19 - Production Hardening)
 
-- **Multi-Hop Mesh Routing**: Allow peers (Desktop/Always-on) to act as relays for mobile peers, enabling A -> B -> C transfers when direct NAT punch fails.
-- **WebRTC Gateway**: Implement a lightweight WebRTC-to-QUIC bridge to support secure file transfers directly from a web browser.
-- **Encrypted Peer Chat History**: Migrate chat persistence to the Rust SQLite layer with per-peer E2E encryption keys.
-- **Auto-Update System**: Native self-update mechanism for the Rust daemon using side-loading on Windows.
+Critical improvements needed before public release:
 
-## Phase 2: Long-Distance Transfer (LDT)
+- **TURN Relay Deployment**: Self-hosted TURN servers for NAT traversal (currently relying on Google STUN only).
+- **Error Recovery**: Robust reconnection logic for network failures mid-transfer.
+- **Mobile Battery Optimization**: Real-world testing and tuning of adaptive throttling on iOS/Android.
+- **Automated CI/CD**: Cross-platform build automation (Windows/macOS/Linux/Android/iOS).
+- **User-Facing Metrics**: Expose connection quality, transfer speed, and system health to UI.
 
-### Session Codes for Remote Pairing
+## ✨ Tier 3: Enhanced Mesh Capabilities
 
-- [ ] Session code expiry notifications and renewal flow
+Features that directly impact the user experience and transfer speed.
 
-- [ ] Temporary "Session Peer" entries that auto-expire
+### UX Improvements
 
-### UDP Hole Punching
-
-- [ ] Persistent UDP connection management for LDT transfer resumption
-
-## Optional: Public Volunteer Relays
-
-### Relay Infrastructure
-
-- [ ] Public relay coordinator nodes (opt-in for desktop users)
-- [ ] Relay discovery protocol (separate from friend relays)
-- [ ] Bandwidth limits and fair usage policies
-- [ ] End-to-end encryption verification (relays can't read data)
-
-### Alternative: Minimal TURN Server
-
-- [ ] Deploy a single stateless TURN server as absolute fallback
-- [ ] Self-hosting instructions for users
-- [ ] Integration with free public TURN services (Google, Twilio)
-
-## Device Recovery & Backup
-
-### Account System (Optional)
-
-- [ ] Anonymous login (email/passkey) for device recovery
-- [ ] Encrypted cloud backup of private key (`hydra_id`)
-- [ ] Cross-device friend list sync
-- [ ] Trusted device management
-
-### Lost Device Handling
-
-- [ ] Manual "Report Lost Device" feature
-- [ ] Immediate removal from friend networks
-- [ ] Key rotation and re-pairing flow
-
-## Advanced Multi-Path
-
-### Additional Connectivity Options
-
-- [ ] NFC tap-to-pair (Android)
-- [ ] Mesh routing via multiple hops (A → B → C transfers)
-
-### Connection Quality
-
-- [ ] Automatic speed testing (dynamic bandwidth optimization)
-- [ ] Multi-stream transfers (use WiFi + Bluetooth simultaneously)
-- [ ] Connection bonding for aggregate bandwidth
-
-## Privacy & Security Enhancements
-
-### Enhanced Cryptography
-
-- [ ] Post-quantum encryption (lattice-based)
-- [ ] Perfect forward secrecy for each file transfer
-- [ ] Zero-knowledge key exchange
-
-### Privacy Features
-
-- [ ] "Incognito Mode" (don't save to paired list)
-- [ ] Time-limited friendships (auto-delete after X days)
-- [ ] Metadata minimization (hide transfer sizes, timing)
-
-## Optimization & Scalability
+- [ ] **Rich Notifications**: Progress bars in system notifications.
+- [ ] **Transfer History**: Searchable history database.
+- [ ] **File Preview**: Thumbnail generation before accepting.
+- [ ] **Completion Sounds**: Audio feedback.
 
 ### Performance
 
-- [ ] Parallel chunk transfers for large files
-- [ ] Adaptive compression based on file type
-- [ ] Resume partial transfers across connectivity changes
+- [ ] **Multipath QUIC (Draft)**: Future-proofing with experimental RFC 9221/9222 support.
+
+## 📱 Tier 4: Mobile & Privacy Enhancements
+
+Optimizations for mobile constraints and user privacy.
 
 ### Mobile-Specific
 
-- [ ] Battery-aware relay participation (reduce activity below 20%)
-- [ ] Data usage tracking and warnings
-- [ ] Background transfer scheduling (WiFi-only mode)
+- [ ] **Background Scheduling**: Queue large transfers for WiFi-only.
+- [ ] **Data Usage Controls**: Warnings for cellular transfers.
 
-## UX Improvements
+### Privacy
 
-### Interface
+- [ ] **Incognito Mode**: Ephemeral pairing that doesn't save to the DB.
+- [ ] **Metadata Minimization**: Hide transfer exact sizes/times from traffic analysis.
 
-- [ ] Dark mode refinements
-- [ ] Transfer history with search
-- [ ] File preview before accepting
-- [ ] Batch file selection
+## 🔮 Tier 5: Strategic Goals (Long Term)
 
-### Notifications
+Major architectural shifts or platform expansions.
 
-- [ ] Rich notifications with transfer progress
-- [ ] Completion sounds
-- [ ] Failed transfer retry prompts
+### Web & Cloud
+
+- [ ] **WebRTC Gateway**: Browser-based transfers without app installation.
+- [ ] **Public Volunteer Relays**: Trustless relay nodes for global connectivity.
+- [ ] **Account System**: Optional keysync for multi-device owners.
+- [ ] **Decentralized ID (DID)**: Self-sovereign identity verification.
+
+---
 
 ## ✅ Completed Milestones
 
 - **Pure Rust Engine Migration**: Successfully decommissioned the legacy Go daemon and ported all functionality (Discovery, Mesh, Auth, Transfer) to a unified Rust engine (`hydra_muscle`).
-- **Direct FFI Command API**: Implemented a JSON-based command dispatcher, eliminating Go callbacks and achieving 15% lower command latency.
+- **Hybrid QR/PIN Pairing**: Native multi-IP JSON QR handshake and secure PIN pairing implemented in the Rust core.
+- **Direct FFI Command API**: 100% JSON-based (moving to binary) FFI bridge between Flutter and Rust, eliminating the Go layer.
 - **Thread-Safe Engine Orchestration**: Introduced `EngineState` and `Database` wrappers using Rust's safety model to manage multi-threaded networking.
-- **PIN-Based Pairing (Rust)**: Native implementation of PBKDF2-HMAC pairing and session code generation in the Rust core.
-- **Modular Network Stack**: Refactored the engine into distinct, testable modules (`quic`, `mesh`, `auth`, `transfer`), significantly improving developer velocity.
 - **SQLite Optimization**: Migrated all persistence to high-performance SQLite via `rusqlite` with WAL mode and targeted indexing.
 - **Cross-Platform Build System**: Standardized PowerShell and Bash scripts for native Rust builds on Windows and Android (NDK).
+- **Long Distance Transfers (LDT)**: Implemented STUN-based public IP discovery and a direct UDP signaling relay for WAN-to-WAN connectivity.
+- **Adaptive Connectivity (Multi-Path)**: Implemented "Happy Eyeballs" parallel dialing across LAN, USB, and Hotspot interfaces with automatic scoring and prioritization.
+- **Bluetooth Signaling Fallback**: Integrated a WinSock RFCOMM transport as a low-level control plane for signaling when IP connectivity is lost.
+- **Zero-Copy Binary FFI**: Migrated FFI communication to `rkyv` for high-performance, nanosecond-range cross-process serialization.
+- **Post-Quantum Security (PQE)**: Integrated `aws-lc-rs` for hybrid Kyber/X25519 key exchange, protecting against quantum decrypt-later attacks.
+- **Delta-Sync Protocol**: Implemented block-level transfers (rsync-style) with SHA-256 chunk hashing for efficient resumption and updates.
+- **Authenticated Signaling**: Implemented HMAC-SHA256 signature verification for signaling payloads using SPAKE2 session keys, preventing MITM attacks during pairing.
+- **Dynamic Port Binding**: Refactored Orchestrator to bind to random available ports and propagate the port dynamically via mDNS/Signaling, eliminating hardcoded port conflicts.
+- **Parallel Chunk Transfers**: Simultaneous multi-stream Quinn implementation for massive throughput gains.
+- **Adaptive Compression**: Integrated Zstd on-the-fly compression for text-based assets while skipping pre-compressed media.
+- **Asynchronous Disk Assembly**: High-performance chunked file assembly using non-blocking I/O and atomic progress tracking.
+- **Send-Compliant Quinn Core**: Full refactor of the QUIC transport layer to ensure thread-safety and compatibility with multi-threaded runtimes.
+- **Connection Bonding**: Multi-path QUIC implementation aggregating WiFi + Ethernet + Cellular bandwidth for maximum throughput.
+- **BBR Congestion Control**: Integrated Google's BBR (Bottleneck Bandwidth and Round-trip time) for superior performance on high-latency/lossy links.
+- **System Intelligence (Smarts)**: Integrated `sysinfo` for real-time battery, thermal, and CPU monitoring.
+- **Adaptive Throttling**: Automatic transfer scaling based on device health (Heat/Battery/Resource pressure).
+- **Dijkstra-Lite Pathfinding**: Dynamic link scoring based on RTT, packet loss, and link type (WiFi vs Ethernet vs Hotspot).
+- **Smart Mesh Forwarding**: Implemented multi-hop signaling and chat relaying, enabling communication through restricted NATs.
+- **Cooperative Health**: Neighbors share system health via smart heartbeats to optimize network-wide energy usage.
+- **Async Connection Timing Fix**: Implemented robust polling logic for multi-hop connection verification, ensuring test reliability.
 
 ---
 
-**Note:** Items in this file are NOT blocking current functionality. HydraShare works fully without these features. Prioritize based on user feedback.
+## 📋 Long-Term Feature Roadmap
+
+### Phase 20: Multi-User Collaborative Folders
+
+- Real-time folder synchronization across mesh peers
+- Conflict resolution for simultaneous edits
+- Selective sync and bandwidth management
+
+### Phase 21: Browser-Based Lightweight Client
+
+- WebAssembly build of core transfer engine
+- WebRTC data channels for browser-to-native transfers
+- Progressive Web App for installation-free access
+
+### Phase 22: Decentralized Discovery (DHT)
+
+- Distributed hash table for global peer registry
+- Zero-trust relay selection via reputation system
+- End-to-end encrypted metadata exchange

@@ -106,6 +106,18 @@ impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
     }
 }
 
+pub fn make_transport_config() -> quinn::TransportConfig {
+    let mut config = quinn::TransportConfig::default();
+    // Enable BBR congestion control (improves performance on higher latency/WAN links)
+    // In Quinn 0.11 BBR is often default or readily available. 
+    // We use a safe factory approach.
+    config.congestion_controller_factory(Arc::new(quinn::congestion::BbrConfig::default()));
+    config.max_idle_timeout(Some(std::time::Duration::from_secs(30).try_into().unwrap()));
+    config.keep_alive_interval(Some(std::time::Duration::from_secs(5)));
+    config.mtu_discovery_config(Some(quinn::MtuDiscoveryConfig::default()));
+    config
+}
+
 pub fn make_hydra_server_config(priv_key: Option<&[u8]>) -> ServerConfig {
     let (certificate, private_key) = if let Some(pk) = priv_key {
         let seed = &pk[..32];
@@ -143,6 +155,7 @@ pub fn make_hydra_server_config(priv_key: Option<&[u8]>) -> ServerConfig {
     crypto.max_early_data_size = 0xffffffff;
 
     let mut server_config = ServerConfig::with_crypto(Arc::new(quinn::crypto::rustls::QuicServerConfig::try_from(crypto).unwrap()));
+    server_config.transport_config(Arc::new(make_transport_config()));
     server_config.migration(true);
     server_config
 }
@@ -164,5 +177,7 @@ pub fn make_client_config(expected_peer_id: Option<String>) -> ClientConfig {
     crypto.alpn_protocols = vec![b"hydra-p2p".to_vec()];
     crypto.enable_early_data = true;
 
-    ClientConfig::new(Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(crypto).unwrap()))
+    let mut client_config = ClientConfig::new(Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(crypto).unwrap()));
+    client_config.transport_config(Arc::new(make_transport_config()));
+    client_config
 }

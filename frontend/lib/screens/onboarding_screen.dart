@@ -115,8 +115,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Widget _buildFooter(ThemeData theme) {
     return Padding(
-      padding: const EdgeInsets.all(40.0),
+      padding: const EdgeInsets.fromLTRB(40, 20, 40, 40),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -136,11 +137,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     curve: Curves.easeInOut,
                   );
                 } else {
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(
-                      builder: (context) => const RoleSelectionScreen(),
-                    ),
-                  );
+                  _completeOnboarding();
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -151,22 +148,41 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          TextButton(
+            onPressed: _completeOnboarding,
+            child: Text(
+              'Skip',
+              style: TextStyle(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
+  void _completeOnboarding() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (context) => const RoleSelectionScreen()),
+    );
+  }
+
   Widget _buildIndicator(bool isActive, ThemeData theme) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      margin: const EdgeInsets.only(right: 8),
-      height: 8,
-      width: isActive ? 24 : 8,
-      decoration: BoxDecoration(
-        color: isActive
-            ? theme.colorScheme.primary
-            : theme.colorScheme.primary.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(4),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        height: 8,
+        width: isActive ? 24 : 8,
+        decoration: BoxDecoration(
+          color: isActive
+              ? theme.colorScheme.primary
+              : theme.colorScheme.primary.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(4),
+        ),
       ),
     );
   }

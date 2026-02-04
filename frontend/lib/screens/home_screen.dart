@@ -612,7 +612,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ),
       backgroundColor: Colors.transparent,
       elevation: 0,
-      centerTitle: isDesktop,
+      centerTitle: true,
       actions: [
         IconButton(
           icon: Icon(

@@ -219,13 +219,13 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
               data: qrData,
               version: QrVersions.auto,
               size: 280.0,
-              eyeStyle: QrEyeStyle(
+              eyeStyle: const QrEyeStyle(
                 eyeShape: QrEyeShape.circle,
-                color: theme.colorScheme.primary,
+                color: Colors.black,
               ),
-              dataModuleStyle: QrDataModuleStyle(
+              dataModuleStyle: const QrDataModuleStyle(
                 dataModuleShape: QrDataModuleShape.circle,
-                color: theme.colorScheme.primary.withOpacity(0.8),
+                color: Colors.black87,
               ),
             ),
             if (!isDesktop) ...[

@@ -22,12 +22,52 @@ class AdaptiveLayout extends StatelessWidget {
     this.showAppBar = true,
     this.scrollController,
     this.centerContent = true,
+    this.useScrollView = true,
   });
+
+  final bool useScrollView;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final effectiveController = scrollController ?? ScrollController();
+
+    Widget bodyContent = Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: centerContent && useScrollView
+              ? 0 // Handled by SingleChildScrollView
+              : 0,
+          maxWidth: maxWidth,
+        ),
+        child: centerContent ? Center(child: child) : child,
+      ),
+    );
+
+    if (useScrollView) {
+      bodyContent = LayoutBuilder(
+        builder: (context, viewportConstraints) {
+          return SingleChildScrollView(
+            controller: effectiveController,
+            physics: const BouncingScrollPhysics(),
+            padding: padding,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: centerContent
+                      ? viewportConstraints.maxHeight - padding.vertical
+                      : 0,
+                  maxWidth: maxWidth,
+                ),
+                child: centerContent ? Center(child: child) : child,
+              ),
+            ),
+          );
+        },
+      );
+    } else {
+      bodyContent = Padding(padding: padding, child: bodyContent);
+    }
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -36,32 +76,11 @@ class AdaptiveLayout extends StatelessWidget {
               title: title != null ? Text(title!) : null,
               leading: leading,
               actions: actions,
+              centerTitle: true,
             )
           : null,
       body: SafeArea(
-        child: Scrollbar(
-          controller: effectiveController,
-          child: LayoutBuilder(
-            builder: (context, viewportConstraints) {
-              return SingleChildScrollView(
-                controller: effectiveController,
-                physics: const BouncingScrollPhysics(),
-                padding: padding,
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minHeight: centerContent
-                          ? viewportConstraints.maxHeight - padding.vertical
-                          : 0,
-                      maxWidth: maxWidth,
-                    ),
-                    child: centerContent ? Center(child: child) : child,
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
+        child: Scrollbar(controller: effectiveController, child: bodyContent),
       ),
     );
   }

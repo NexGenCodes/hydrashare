@@ -116,35 +116,39 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget _buildFooter(ThemeData theme) {
     return Padding(
       padding: const EdgeInsets.all(40.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(
               _items.length,
               (index) => _buildIndicator(index == _currentPage, theme),
             ),
           ),
-          ElevatedButton(
-            onPressed: () {
-              if (_currentPage < _items.length - 1) {
-                _pageController.nextPage(
-                  duration: const Duration(milliseconds: 300),
-                  curve: Curves.easeInOut,
-                );
-              } else {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(
-                    builder: (context) => const RoleSelectionScreen(),
-                  ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-            ),
-            child: Text(
-              _currentPage < _items.length - 1 ? 'Next' : 'Get Started',
+          const SizedBox(height: 32),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                if (_currentPage < _items.length - 1) {
+                  _pageController.nextPage(
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeInOut,
+                  );
+                } else {
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (context) => const RoleSelectionScreen(),
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+              ),
+              child: Text(
+                _currentPage < _items.length - 1 ? 'Next' : 'Get Started',
+              ),
             ),
           ),
         ],

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/daemon_service.dart';
+import '../widgets/adaptive_layout.dart';
 import '../widgets/chat_widgets.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -126,20 +127,20 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_peerName),
-        leading: BackButton(onPressed: () => Navigator.pop(context)),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.attach_file_rounded),
-            onPressed: () {
-              // TODO: Implement file picking
-            },
-          ),
-        ],
-      ),
-      body: Column(
+    return AdaptiveLayout(
+      title: _peerName,
+      leading: BackButton(onPressed: () => Navigator.pop(context)),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.attach_file_rounded),
+          onPressed: () {
+            // TODO: Implement file picking
+          },
+        ),
+      ],
+      useScrollView: false,
+      padding: EdgeInsets.zero,
+      child: Column(
         children: [
           Expanded(
             child: Container(

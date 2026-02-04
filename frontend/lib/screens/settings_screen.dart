@@ -97,12 +97,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildSection(ThemeData theme, String title, List<Widget> children) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Text(
             title.toUpperCase(),
+            textAlign: TextAlign.center,
             style: theme.textTheme.labelSmall?.copyWith(
               color: theme.colorScheme.primary,
               fontWeight: FontWeight.bold,

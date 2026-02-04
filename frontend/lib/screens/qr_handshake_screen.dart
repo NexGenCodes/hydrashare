@@ -143,7 +143,7 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
-          flex: 5,
+          flex: 1,
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -155,7 +155,7 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
           ),
         ),
         const SizedBox(width: 64),
-        Expanded(flex: 4, child: _buildQrSection(theme, qrData, true)),
+        Expanded(flex: 1, child: _buildQrSection(theme, qrData, true)),
       ],
     );
   }

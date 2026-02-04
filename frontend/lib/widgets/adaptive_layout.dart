@@ -8,6 +8,7 @@ class AdaptiveLayout extends StatelessWidget {
   final EdgeInsetsGeometry padding;
   final double maxWidth;
   final bool showAppBar;
+  final bool centerContent;
   final ScrollController? scrollController;
 
   const AdaptiveLayout({
@@ -20,6 +21,7 @@ class AdaptiveLayout extends StatelessWidget {
     this.maxWidth = 900,
     this.showAppBar = true,
     this.scrollController,
+    this.centerContent = true,
   });
 
   @override
@@ -48,11 +50,12 @@ class AdaptiveLayout extends StatelessWidget {
                 child: Center(
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
-                      minHeight:
-                          viewportConstraints.maxHeight - padding.vertical,
+                      minHeight: centerContent
+                          ? viewportConstraints.maxHeight - padding.vertical
+                          : 0,
                       maxWidth: maxWidth,
                     ),
-                    child: IntrinsicHeight(child: Center(child: child)),
+                    child: centerContent ? Center(child: child) : child,
                   ),
                 ),
               );

@@ -47,21 +47,31 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     return AdaptiveLayout(
       showAppBar: false,
       padding: EdgeInsets.zero,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Expanded(
-            child: PageView.builder(
-              controller: _pageController,
-              onPageChanged: (index) => setState(() => _currentPage = index),
-              itemCount: _items.length,
-              itemBuilder: (context, index) {
-                return _buildPage(_items[index], theme);
-              },
-            ),
-          ),
-          _buildFooter(theme),
-        ],
+      centerContent: false,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Calculate height minus footer
+          final footerHeight = 140.0; // Estimated footer height
+          final viewHeight = MediaQuery.of(context).size.height - footerHeight;
+
+          return Column(
+            children: [
+              SizedBox(
+                height: viewHeight > 0 ? viewHeight : 500,
+                child: PageView.builder(
+                  controller: _pageController,
+                  onPageChanged: (index) =>
+                      setState(() => _currentPage = index),
+                  itemCount: _items.length,
+                  itemBuilder: (context, index) {
+                    return _buildPage(_items[index], theme);
+                  },
+                ),
+              ),
+              _buildFooter(theme),
+            ],
+          );
+        },
       ),
     );
   }

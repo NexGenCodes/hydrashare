@@ -8,129 +8,65 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'ffi.freezed.dart';
 
-@freezed
-sealed class DaemonCommand with _$DaemonCommand {
-  const DaemonCommand._();
+            
 
-  const factory DaemonCommand.init({required String dataDir}) =
-      DaemonCommand_Init;
-  const factory DaemonCommand.startEngine() = DaemonCommand_StartEngine;
-  const factory DaemonCommand.stopEngine() = DaemonCommand_StopEngine;
-  const factory DaemonCommand.saveMessage({required String message}) =
-      DaemonCommand_SaveMessage;
-  const factory DaemonCommand.getMessages({required String peerId}) =
-      DaemonCommand_GetMessages;
-  const factory DaemonCommand.sendFile({
-    required String peerId,
-    required String filePath,
-  }) = DaemonCommand_SendFile;
-  const factory DaemonCommand.acceptFile({
-    required String offerId,
-    required String peerId,
-    required BigInt fileSize,
-    required String destPath,
-  }) = DaemonCommand_AcceptFile;
-  const factory DaemonCommand.cancelTransfer({required String transferId}) =
-      DaemonCommand_CancelTransfer;
-  const factory DaemonCommand.markMessagesRead({required String peerId}) =
-      DaemonCommand_MarkMessagesRead;
-  const factory DaemonCommand.rejectFile({
-    required String offerId,
-    required String peerId,
-  }) = DaemonCommand_RejectFile;
-  const factory DaemonCommand.generateCredentials() =
-      DaemonCommand_GenerateCredentials;
-  const factory DaemonCommand.generateQrPayload() =
-      DaemonCommand_GenerateQrPayload;
-  const factory DaemonCommand.joinSession({required String pin}) =
-      DaemonCommand_JoinSession;
-  const factory DaemonCommand.setSettings({
-    required String key,
-    required String text,
-  }) = DaemonCommand_SetSettings;
-  const factory DaemonCommand.getSettings({required String key}) =
-      DaemonCommand_GetSettings;
-  const factory DaemonCommand.generateSessionCode() =
-      DaemonCommand_GenerateSessionCode;
-  const factory DaemonCommand.joinSessionCode({required String text}) =
-      DaemonCommand_JoinSessionCode;
-  const factory DaemonCommand.setDeviceName({required String name}) =
-      DaemonCommand_SetDeviceName;
-  const factory DaemonCommand.startDiscovery() = DaemonCommand_StartDiscovery;
-  const factory DaemonCommand.generateCode() = DaemonCommand_GenerateCode;
-  const factory DaemonCommand.connectPeer({
-    required String peerId,
-    required String address,
-    required int port,
-    String? encryptionKey,
-  }) = DaemonCommand_ConnectPeer;
-  const factory DaemonCommand.stopDiscovery() = DaemonCommand_StopDiscovery;
-  const factory DaemonCommand.disconnectPeer({required String peerId}) =
-      DaemonCommand_DisconnectPeer;
-}
+            
+
+            @freezed
+                sealed class DaemonCommand with _$DaemonCommand  {
+                    const DaemonCommand._();
+
+                     const factory DaemonCommand.init({   required String dataDir , }) = DaemonCommand_Init;
+ const factory DaemonCommand.startEngine() = DaemonCommand_StartEngine;
+ const factory DaemonCommand.stopEngine() = DaemonCommand_StopEngine;
+ const factory DaemonCommand.saveMessage({   required String message , }) = DaemonCommand_SaveMessage;
+ const factory DaemonCommand.getMessages({   required String peerId , }) = DaemonCommand_GetMessages;
+ const factory DaemonCommand.sendFile({   required String peerId ,  required String filePath , }) = DaemonCommand_SendFile;
+ const factory DaemonCommand.acceptFile({   required String offerId ,  required String peerId ,  required BigInt fileSize ,  required String destPath , }) = DaemonCommand_AcceptFile;
+ const factory DaemonCommand.cancelTransfer({   required String transferId , }) = DaemonCommand_CancelTransfer;
+ const factory DaemonCommand.markMessagesRead({   required String peerId , }) = DaemonCommand_MarkMessagesRead;
+ const factory DaemonCommand.rejectFile({   required String offerId ,  required String peerId , }) = DaemonCommand_RejectFile;
+ const factory DaemonCommand.generateCredentials() = DaemonCommand_GenerateCredentials;
+ const factory DaemonCommand.generateQrPayload() = DaemonCommand_GenerateQrPayload;
+ const factory DaemonCommand.joinSession({   required String pin , }) = DaemonCommand_JoinSession;
+ const factory DaemonCommand.setSettings({   required String key ,  required String text , }) = DaemonCommand_SetSettings;
+ const factory DaemonCommand.getSettings({   required String key , }) = DaemonCommand_GetSettings;
+ const factory DaemonCommand.generateSessionCode() = DaemonCommand_GenerateSessionCode;
+ const factory DaemonCommand.joinSessionCode({   required String text , }) = DaemonCommand_JoinSessionCode;
+ const factory DaemonCommand.setDeviceName({   required String name , }) = DaemonCommand_SetDeviceName;
+ const factory DaemonCommand.startDiscovery() = DaemonCommand_StartDiscovery;
+ const factory DaemonCommand.generateCode() = DaemonCommand_GenerateCode;
+ const factory DaemonCommand.connectPeer({   required String peerId ,  required String address ,  required int port ,  String? encryptionKey , }) = DaemonCommand_ConnectPeer;
+ const factory DaemonCommand.stopDiscovery() = DaemonCommand_StopDiscovery;
+ const factory DaemonCommand.disconnectPeer({   required String peerId , }) = DaemonCommand_DisconnectPeer;
+
+                    
+
+                    
+                }
 
 @freezed
-sealed class DaemonEvent with _$DaemonEvent {
-  const DaemonEvent._();
+                sealed class DaemonEvent with _$DaemonEvent  {
+                    const DaemonEvent._();
 
-  const factory DaemonEvent.peerDiscovered({
-    required String peerId,
-    required String name,
-    required String ip,
-    required int port,
-  }) = DaemonEvent_PeerDiscovered;
-  const factory DaemonEvent.peerLost({required String peerId}) =
-      DaemonEvent_PeerLost;
-  const factory DaemonEvent.transferProgress({
-    required String transferId,
-    required BigInt bytesTransferred,
-    required BigInt totalBytes,
-    required double speed,
-  }) = DaemonEvent_TransferProgress;
-  const factory DaemonEvent.transferComplete({
-    required String transferId,
-    required String status,
-  }) = DaemonEvent_TransferComplete;
-  const factory DaemonEvent.pairingRequest({
-    required String peerId,
-    required String pin,
-  }) = DaemonEvent_PairingRequest;
-  const factory DaemonEvent.transferOffer({
-    required String peerId,
-    required String transferId,
-    required String fileName,
-    required BigInt fileSize,
-    String? thumbnail,
-  }) = DaemonEvent_TransferOffer;
-  const factory DaemonEvent.logMessage({
-    required String level,
-    required String message,
-  }) = DaemonEvent_LogMessage;
-  const factory DaemonEvent.credentialsGenerated({
-    required String pin,
-    required String sessionKey,
-  }) = DaemonEvent_CredentialsGenerated;
-  const factory DaemonEvent.qrPayloadGenerated({required String payloadJson}) =
-      DaemonEvent_QrPayloadGenerated;
-  const factory DaemonEvent.settingReported({
-    required String key,
-    required String value,
-  }) = DaemonEvent_SettingReported;
-  const factory DaemonEvent.sessionCodeGenerated({required String code}) =
-      DaemonEvent_SessionCodeGenerated;
-  const factory DaemonEvent.signalingStarted({required String id}) =
-      DaemonEvent_SignalingStarted;
-  const factory DaemonEvent.codeGenerated({
-    required String key,
-    String? pin,
-    required String ip,
-  }) = DaemonEvent_CodeGenerated;
-  const factory DaemonEvent.peerDisconnected({required String peerId}) =
-      DaemonEvent_PeerDisconnected;
-  const factory DaemonEvent.peerConnected({
-    required String peerId,
-    required String name,
-    required String address,
-    required int port,
-  }) = DaemonEvent_PeerConnected;
-}
+                     const factory DaemonEvent.peerDiscovered({   required String peerId ,  required String name ,  required String ip ,  required int port , }) = DaemonEvent_PeerDiscovered;
+ const factory DaemonEvent.peerLost({   required String peerId , }) = DaemonEvent_PeerLost;
+ const factory DaemonEvent.transferProgress({   required String transferId ,  required BigInt bytesTransferred ,  required BigInt totalBytes ,  required double speed , }) = DaemonEvent_TransferProgress;
+ const factory DaemonEvent.transferComplete({   required String transferId ,  required String status , }) = DaemonEvent_TransferComplete;
+ const factory DaemonEvent.pairingRequest({   required String peerId ,  required String pin , }) = DaemonEvent_PairingRequest;
+ const factory DaemonEvent.transferOffer({   required String peerId ,  required String transferId ,  required String fileName ,  required BigInt fileSize ,  String? thumbnail , }) = DaemonEvent_TransferOffer;
+ const factory DaemonEvent.logMessage({   required String level ,  required String message , }) = DaemonEvent_LogMessage;
+ const factory DaemonEvent.credentialsGenerated({   required String pin ,  required String sessionKey , }) = DaemonEvent_CredentialsGenerated;
+ const factory DaemonEvent.qrPayloadGenerated({   required String payloadJson , }) = DaemonEvent_QrPayloadGenerated;
+ const factory DaemonEvent.settingReported({   required String key ,  required String value , }) = DaemonEvent_SettingReported;
+ const factory DaemonEvent.sessionCodeGenerated({   required String code , }) = DaemonEvent_SessionCodeGenerated;
+ const factory DaemonEvent.signalingStarted({   required String id , }) = DaemonEvent_SignalingStarted;
+ const factory DaemonEvent.codeGenerated({   required String key ,  String? pin ,  required String ip , }) = DaemonEvent_CodeGenerated;
+ const factory DaemonEvent.peerDisconnected({   required String peerId , }) = DaemonEvent_PeerDisconnected;
+ const factory DaemonEvent.peerConnected({   required String peerId ,  required String name ,  required String address ,  required int port , }) = DaemonEvent_PeerConnected;
+
+                    
+
+                    
+                }
+            

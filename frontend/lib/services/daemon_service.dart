@@ -111,24 +111,24 @@ class DaemonService {
 
       final appDir = await getApplicationSupportDirectory();
       if (!await appDir.exists()) {
-        print('DEBUG_HYDRA: 📁 Creating support directory...');
+        debugPrint('DEBUG_HYDRA: 📁 Creating support directory...');
         await appDir.create(recursive: true);
       }
-      print('DEBUG_HYDRA: 📂 Data Directory (Support): ${appDir.path}');
+      debugPrint('DEBUG_HYDRA: 📂 Data Directory (Support): ${appDir.path}');
 
       // Initialize the daemon (sets up DB, logging, etc.)
       const dbName = 'hydra.db';
       final dbPath = p.join(appDir.path, dbName);
-      print('DEBUG_HYDRA: 🗄️ Expected Database Path: $dbPath');
+      debugPrint('DEBUG_HYDRA: 🗄️ Expected Database Path: $dbPath');
 
       // Verify write access to the directory
       try {
         final testFile = File(p.join(appDir.path, '.write_test'));
         await testFile.writeAsString('test');
         await testFile.delete();
-        print('DEBUG_HYDRA: ✅ Write access confirmed');
+        debugPrint('DEBUG_HYDRA: ✅ Write access confirmed');
       } catch (e) {
-        print('DEBUG_HYDRA: ❌ No write access to directory: $e');
+        debugPrint('DEBUG_HYDRA: ❌ No write access to directory: $e');
       }
 
       final initResult = await rust_api.initDaemon(dataDir: appDir.path);

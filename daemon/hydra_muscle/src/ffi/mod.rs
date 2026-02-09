@@ -18,8 +18,8 @@ use std::panic;
 
 pub static EVENT_QUEUE: Lazy<Mutex<VecDeque<Vec<u8>>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 static ENGINE: Lazy<Arc<Mutex<Option<EngineState>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
-static mut DATABASE: Option<Arc<Database>> = None;
-static mut TRANSFER_MANAGER: Option<Arc<TransferManager>> = None;
+static DATABASE: Lazy<Mutex<Option<Arc<Database>>>> = Lazy::new(|| Mutex::new(None));
+static TRANSFER_MANAGER: Lazy<Mutex<Option<Arc<TransferManager>>>> = Lazy::new(|| Mutex::new(None));
 use crate::system::runtime::RUNTIME;
 
 
@@ -248,10 +248,8 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             let mesh = Arc::new(MeshNetwork::new());
             let transfer = Arc::new(TransferManager::new(db.clone()));
             
-            unsafe {
-                DATABASE = Some(db.clone());
-                TRANSFER_MANAGER = Some(transfer.clone());
-            }
+            *DATABASE.lock().unwrap() = Some(db.clone());
+            *TRANSFER_MANAGER.lock().unwrap() = Some(transfer.clone());
             let my_id = match db.get_config("hydra_priv_key").unwrap_or(None) {
                 Some(key) => Identity::from_saved(&key).unwrap_or_else(|_| Identity::generate()),
                 None => Identity::generate(),
@@ -307,7 +305,7 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             info!("🛑 Engine stopped");
         }
         DaemonCommand::SaveMessage { message } => {
-            if let Some(db) = unsafe { DATABASE.as_ref() } {
+            if let Some(db) = DATABASE.lock().unwrap().as_ref() {
                 match serde_json::from_str::<crate::db::MessageInfo>(&message) {
                     Ok(msg) => {
                         if let Err(e) = db.save_message(&msg) {
@@ -327,7 +325,7 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::GetMessages { peer_id } => {
-            if let Some(db) = unsafe { DATABASE.as_ref() } {
+            if let Some(db) = DATABASE.lock().unwrap().as_ref() {
                 match db.get_messages(&peer_id) {
                     Ok(messages) => {
                         match serde_json::to_string(&messages) {

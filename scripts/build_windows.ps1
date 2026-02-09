@@ -37,15 +37,15 @@ if ($missing.Count -gt 0) {
 # Build Rust Engine
 Write-Step "Building Rust Engine (hydra_muscle)..."
 Push-Location $RUST_DIR
-cargo build --release --target x86_64-pc-windows-gnu
+cargo build --release --target x86_64-pc-windows-msvc
 if ($LASTEXITCODE -ne 0) { Write-Error-Custom "Rust build failed"; exit 1 }
 Pop-Location
 
 # Prepare Artifacts
 Write-Step "Collecting Artifacts..."
 if (!(Test-Path $BIN_DIR)) { New-Item -ItemType Directory -Path $BIN_DIR | Out-Null }
-$dllSrc = "$RUST_DIR\target\x86_64-pc-windows-gnu\release\hydra_muscle.dll"
-$binSrc = "$RUST_DIR\target\x86_64-pc-windows-gnu\release\hydra_daemon.exe"
+$dllSrc = "$RUST_DIR\target\x86_64-pc-windows-msvc\release\hydra_muscle.dll"
+$binSrc = "$RUST_DIR\target\x86_64-pc-windows-msvc\release\hydra_daemon.exe"
 
 if (!(Test-Path $dllSrc)) {
     Write-Error-Custom "Rust DLL not found at $dllSrc"

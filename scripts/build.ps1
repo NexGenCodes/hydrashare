@@ -14,8 +14,14 @@ if ($Clean) {
     cd "$ProjectRoot\frontend"
     flutter clean
     cd $ProjectRoot
-    # Cargo is cleaned as part of the individual build scripts if needed
+    # Remove Rust targets to force full rebuild
+    Remove-Item -Recurse -Force "$ProjectRoot\daemon\hydra_muscle\target" -ErrorAction SilentlyContinue
 }
+
+# Ensure Dart dependencies are up to date
+Write-Host "`n>> Syncing Dart Dependencies..." -ForegroundColor Cyan
+cd "$ProjectRoot\frontend"
+flutter pub get
 
 # Always perform Codegen to ensure sync
 Write-Host "`n>> Running FRB Codegen..." -ForegroundColor Cyan

@@ -25,6 +25,12 @@ pub struct MeshNetwork {
     pub peers: Arc<RwLock<HashMap<String, MeshPeer>>>,
 }
 
+impl Default for MeshNetwork {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MeshNetwork {
     pub fn new() -> Self {
         Self {
@@ -56,6 +62,12 @@ impl MeshNetwork {
         let mut peers = self.peers.write().unwrap();
         if let Some(peer) = peers.get_mut(peer_id) {
             peer.session_id = Some(session_id);
+        }
+    }
+    pub fn update_peer_status(&self, peer_id: &str, status: PeerStatus) {
+        let mut peers = self.peers.write().unwrap();
+        if let Some(peer) = peers.get_mut(peer_id) {
+            peer.status = status;
         }
     }
 }

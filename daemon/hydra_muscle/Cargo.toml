@@ -4,7 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib", "staticlib", "rlib"]  # rlib needed for bin target
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+[[bin]]
+name = "hydra_daemon"
+path = "src/bin/hydra_daemon.rs"
 
 [dependencies]
 sha2 = "0.10"
@@ -22,9 +29,13 @@ x509-parser = "0.16"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rusqlite = { version = "0.31", features = ["bundled"] }
-tracing = "0.1"
+tracing = { version = "0.1", features = ["log"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-log = "0.2"
 tracing-appender = "0.2"
+android_logger = "0.13"
+log = "0.4"
+backtrace = "0.3"
 thiserror = "1.0"
 anyhow = "1.0"
 directories = "5.0"
@@ -40,6 +51,7 @@ stun = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 futures = "0.3"
 rkyv = { version = "0.7", features = ["validation"] }
+flutter_rust_bridge = "=2.11.1"
 spake2 = "0.4.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 zstd = "0.13"

@@ -1,5 +1,5 @@
 use hydra_muscle::common::networks::{classify_network, NetworkType};
-use std::net::IpAddr;
+
 
 #[test]
 fn test_network_classification() {

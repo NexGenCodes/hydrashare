@@ -38,3 +38,16 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# Copy hydra_muscle.dll from daemon/bin to the executable directory
+set(DAEMON_BIN_DIR "${CMAKE_SOURCE_DIR}/../../daemon/bin")
+set(RUST_DLL_SOURCE "${DAEMON_BIN_DIR}/hydra_muscle.dll")
+set(RUST_DLL_DEST "$<TARGET_FILE_DIR:${BINARY_NAME}>/hydra_muscle.dll")
+
+add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${RUST_DLL_SOURCE}"
+        "${RUST_DLL_DEST}"
+    COMMENT "Copying hydra_muscle.dll from ${DAEMON_BIN_DIR}"
+)
+

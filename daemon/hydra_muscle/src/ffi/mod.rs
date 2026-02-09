@@ -1,10 +1,9 @@
 use std::sync::{Mutex, Arc};
 use std::collections::VecDeque;
-use std::ffi::{CString, CStr};
-use std::os::raw::c_char;
+use std::ffi::CString;
 use once_cell::sync::Lazy;
 use serde::{Serialize, Deserialize};
-use tracing::info;
+use tracing::{info, error};
 use crate::core::engine::EngineState;
 use crate::db::Database;
 use crate::mesh::{MeshNetwork, orchestrator::Orchestrator};
@@ -12,13 +11,17 @@ use crate::discovery::DiscoveryService;
 use crate::transfer::TransferManager;
 use crate::auth::{Identity, service::AuthService};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
-use tracing::error;
 use uuid::Uuid;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use tracing_log::LogTracer;
+use std::panic;
 
 pub static EVENT_QUEUE: Lazy<Mutex<VecDeque<Vec<u8>>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 static ENGINE: Lazy<Arc<Mutex<Option<EngineState>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+static mut DATABASE: Option<Arc<Database>> = None;
+static mut TRANSFER_MANAGER: Option<Arc<TransferManager>> = None;
 use crate::system::runtime::RUNTIME;
+
 
 #[derive(Archive, RkyvDeserialize, RkyvSerialize, Serialize, Deserialize, Debug, Clone)]
 #[archive(check_bytes)]
@@ -52,6 +55,7 @@ pub enum DaemonEvent {
         peer_id: String,
         transfer_id: String,
         file_name: String,
+        file_size: u64,
         thumbnail: Option<String>,
     },
     LogMessage {
@@ -80,6 +84,15 @@ pub enum DaemonEvent {
         pin: Option<String>,
         ip: String,
     },
+    PeerDisconnected {
+        peer_id: String,
+    },
+    PeerConnected {
+        peer_id: String,
+        name: String,
+        address: String,
+        port: u16,
+    },
 }
 
 #[derive(Archive, RkyvDeserialize, RkyvSerialize, Deserialize, Debug)]
@@ -92,17 +105,18 @@ pub enum DaemonCommand {
     },
     StartEngine,
     StopEngine,
+    SaveMessage { message: String }, // JSON of MessageInfo
+    GetMessages { peer_id: String },
     SendFile {
         peer_id: String,
         file_path: String,
-        dest_ip: String,
     },
-    AcceptFile { offer_id: String, peer_id: String, dest_path: String },
+    AcceptFile { offer_id: String, peer_id: String, file_size: u64, dest_path: String },
     CancelTransfer { transfer_id: String },
-    MarkChatAsRead { peer_id: String },
+    MarkMessagesRead { peer_id: String },
     RejectFile {
         offer_id: String,
-        dest_ip: String,
+        peer_id: String,
     },
     GenerateCredentials,
     GenerateQrPayload,
@@ -119,9 +133,27 @@ pub enum DaemonCommand {
     SetDeviceName { name: String },
     StartDiscovery,
     GenerateCode,
+    ConnectPeer {
+        peer_id: String,
+        address: String,
+        port: u16,
+        encryption_key: Option<String>,
+    },
+    StopDiscovery,
+    DisconnectPeer {
+        peer_id: String,
+    },
 }
 
 pub fn emit_event(event: DaemonEvent) {
+    // 1. Send to FRB StreamSink (New)
+    if let Ok(guard) = crate::api::EVENT_SINK.lock() {
+        if let Some(sink) = guard.as_ref() {
+            let _ = sink.add(event.clone());
+        }
+    }
+
+    // 2. Send to Legacy Event Queue (Old/Polling)
     if let Ok(json) = serde_json::to_string(&event) {
         let c_str = CString::new(json).expect("Failed to create CString");
         if let Ok(mut queue) = EVENT_QUEUE.lock() {
@@ -130,130 +162,96 @@ pub fn emit_event(event: DaemonEvent) {
     }
 }
 
-// --- FFI EXPORTS ---
-
-#[no_mangle]
-pub unsafe extern "C" fn poll_event() -> *mut c_char {
-    let result = std::panic::catch_unwind(|| {
-        if let Ok(mut queue) = EVENT_QUEUE.lock() {
-            if let Some(event_bytes) = queue.pop_front() {
-                return CString::from_vec_unchecked(event_bytes).into_raw();
-            }
-        }
-        std::ptr::null_mut()
-    });
-    match result {
-        Ok(ptr) => ptr,
-        Err(e) => {
-            let msg = if let Some(s) = e.downcast_ref::<&str>() { s.to_string() }
-            else if let Some(s) = e.downcast_ref::<String>() { s.clone() }
-            else { "Unknown panic".to_string() };
-            eprintln!("❌ CRITICAL: poll_event panicked: {}", msg);
-            std::ptr::null_mut()
-        }
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn start_engine(db_path_ptr: *const c_char) -> i32 {
-    let result = std::panic::catch_unwind(|| {
-        if db_path_ptr.is_null() { return -1; }
-        let db_path = CStr::from_ptr(db_path_ptr).to_string_lossy().into_owned();
-        handle_command(DaemonCommand::Init { data_dir: db_path })
-    });
-    match result {
-        Ok(res) => res,
-        Err(e) => {
-            let msg = if let Some(s) = e.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = e.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "Unknown panic".to_string()
-            };
-            tracing::error!("❌ CRITICAL: Engine panicked during startup: {}", msg);
-            eprintln!("❌ CRITICAL: Engine panicked during startup: {}", msg);
-            -5
-        }
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn stop_engine() {
-    let result = std::panic::catch_unwind(|| {
-        handle_command(DaemonCommand::StopEngine);
-    });
-    if let Err(e) = result {
-        let msg = if let Some(s) = e.downcast_ref::<&str>() { s.to_string() }
-        else if let Some(s) = e.downcast_ref::<String>() { s.clone() }
-        else { "Unknown panic".to_string() };
-        eprintln!("❌ CRITICAL: stop_engine panicked: {}", msg);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn free_event(ptr: *mut u8, len: u32) {
-    if !ptr.is_null() {
-        let _ = Box::from_raw(std::slice::from_raw_parts_mut(ptr, len as usize));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn free_string(ptr: *mut c_char) {
-    if ptr.is_null() { return; }
-    let _ = std::panic::catch_unwind(|| {
-        let _ = CString::from_raw(ptr);
-    });
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn send_command(ptr: *const u8, len: u32) -> i32 {
-    let result = std::panic::catch_unwind(|| {
-        if ptr.is_null() { return -1; }
-        let bytes = std::slice::from_raw_parts(ptr, len as usize);
-        
-        // Zero-copy deserialization with rkyv
-        let archived = match rkyv::check_archived_root::<DaemonCommand>(bytes) {
-            Ok(a) => a,
-            Err(e) => {
-                tracing::error!("Binary FFI: Validation failed: {:?}", e);
-                return -2;
-            }
-        };
-
-        let command: DaemonCommand = archived.deserialize(&mut rkyv::Infallible).unwrap();
-        handle_command(command)
-    });
-    match result {
-        Ok(res) => res,
-        Err(e) => {
-            let msg = if let Some(s) = e.downcast_ref::<&str>() { s.to_string() }
-            else if let Some(s) = e.downcast_ref::<String>() { s.clone() }
-            else { "Unknown panic".to_string() };
-            eprintln!("❌ CRITICAL: send_command panicked: {}", msg);
-            -5
-        }
-    }
-}
+// --- FFI EXPORTS REMOVED (Migrated to FRB) ---
 
 /// Handle a daemon command (used by both binary and JSON FFI)
 pub fn handle_command(command: DaemonCommand) -> i32 {
     match command {
         DaemonCommand::Init { data_dir } => {
+            // 1. Bridge tracing -> log
+            let _ = LogTracer::init();
+
+            #[cfg(target_os = "android")]
+            {
+                android_logger::init_once(
+                    android_logger::Config::default()
+                        .with_max_level(log::LevelFilter::Info)
+                        .with_tag("HydraDaemon")
+                );
+            }
+
+            // 2. Set Global Panic Hook
+            panic::set_hook(Box::new(|panic_info| {
+                let backtrace = backtrace::Backtrace::new();
+                let location = panic_info.location().map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_else(|| "unknown".to_string());
+                let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "Unknown panic".to_string()
+                };
+
+                let panic_msg = format!("🔥 CRITICAL RUST PANIC at {}: {}\n{:?}", location, message, backtrace);
+                
+                #[cfg(target_os = "android")]
+                {
+                    log::error!("{}", panic_msg);
+                }
+                
+                eprintln!("{}", panic_msg);
+
+                // Try to emit event
+                emit_event(DaemonEvent::LogMessage {
+                    level: "CRITICAL".to_string(),
+                    message: format!("Native Crash: {}", message),
+                });
+            }));
+
+            info!("🚀 Panic hook and logging bridge initialized");
+
             let data_path = std::path::Path::new(&data_dir);
             if !data_path.exists() {
-                let _ = std::fs::create_dir_all(data_path);
+                if let Err(e) = std::fs::create_dir_all(data_path) {
+                    let msg = format!("❌ Failed to create data directory at {:?}: {}", data_path, e);
+                    error!("{}", msg);
+                    emit_event(DaemonEvent::LogMessage {
+                        level: "ERROR".to_string(),
+                        message: msg,
+                    });
+                } else {
+                    info!("📁 Created data directory at {:?}", data_path);
+                }
+            } else {
+                info!("📁 Data directory exists at {:?}", data_path);
             }
+
             
             let db_path = data_path.join("hydra.db");
             let db = match Database::new(&db_path) {
                 Ok(d) => Arc::new(d),
-                Err(_) => return -3,
+                Err(e) => {
+                    let msg = format!("❌ Failed to open database at {:?}: {}", db_path, e);
+                    error!("{}", msg);
+                    emit_event(DaemonEvent::LogMessage {
+                        level: "ERROR".to_string(),
+                        message: msg,
+                    });
+                    return -3;
+                }
+
             };
 
+            // Start background maintenance loop (7-day cleanup)
+            crate::system::start_maintenance_loop(db.clone());
+            
             let mesh = Arc::new(MeshNetwork::new());
             let transfer = Arc::new(TransferManager::new(db.clone()));
             
+            unsafe {
+                DATABASE = Some(db.clone());
+                TRANSFER_MANAGER = Some(transfer.clone());
+            }
             let my_id = match db.get_config("hydra_priv_key").unwrap_or(None) {
                 Some(key) => Identity::from_saved(&key).unwrap_or_else(|_| Identity::generate()),
                 None => Identity::generate(),
@@ -261,21 +259,39 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
 
             let auth = Arc::new(AuthService::new(db.clone()));
             let discovery = Arc::new(DiscoveryService::new(&my_id.peer_id, mesh.clone(), auth.clone()));
-            let orchestrator = Arc::new(Orchestrator::new(&my_id.peer_id, mesh.clone(), discovery.clone()));
+            let orchestrator = Arc::new(Orchestrator::new(&my_id.peer_id, mesh.clone(), discovery.clone(), db.clone()));
 
-            let mut engine = ENGINE.lock().unwrap();
+            let mut engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ Fatal: ENGINE Mutex poisoned: {}", e);
+                    return -1;
+                }
+            };
             *engine = Some(EngineState::new(db, mesh, discovery, transfer, orchestrator, auth));
+
             info!("🚀 Engine initialized in {}", data_dir);
         }
         DaemonCommand::StartEngine => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let orchestrator = state.orchestrator.clone();
                 let discovery = state.discovery.clone();
+
                 
                 // Spawn async start
                 RUNTIME.spawn(async move {
                     let port = orchestrator.start().await.unwrap_or(0);
+                    
+                    // Restore saved peers and attempt reconnection
+                    orchestrator.restore_peers_from_db().await;
+                    
                     discovery.start(orchestrator.clone(), port);
                     crate::system::start_intelligence_loop();
                     info!("📢 Discovery started on port {}", port);
@@ -290,8 +306,56 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             *engine = None;
             info!("🛑 Engine stopped");
         }
-        DaemonCommand::SendFile { peer_id, file_path, dest_ip: _ } => {
-            let engine = ENGINE.lock().unwrap();
+        DaemonCommand::SaveMessage { message } => {
+            if let Some(db) = unsafe { DATABASE.as_ref() } {
+                match serde_json::from_str::<crate::db::MessageInfo>(&message) {
+                    Ok(msg) => {
+                        if let Err(e) = db.save_message(&msg) {
+                            error!("❌ Failed to save message: {}", e);
+                            return -1;
+                        } else {
+                            return 0;
+                        }
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to parse message JSON: {}", e);
+                        return -2;
+                    }
+                }
+            } else {
+                return -3;
+            }
+        }
+        DaemonCommand::GetMessages { peer_id } => {
+            if let Some(db) = unsafe { DATABASE.as_ref() } {
+                match db.get_messages(&peer_id) {
+                    Ok(messages) => {
+                        match serde_json::to_string(&messages) {
+                            Ok(json) => {
+                                emit_event(DaemonEvent::LogMessage {
+                                    level: "DATA".to_string(),
+                                    message: format!("history:{}", json),
+                                });
+                                return 0;
+                            }
+                            Err(_) => return -1,
+                        }
+                    }
+                    Err(_) => return -2,
+                }
+            } else {
+                return -3;
+            }
+        }
+
+        DaemonCommand::SendFile { peer_id, file_path } => {
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 // Look up peer in mesh
                 let peer_info = state.mesh.get_peer(&peer_id);
@@ -311,16 +375,20 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
                         // Generate thumbnail
                         let thumbnail = crate::transfer::preview::PreviewGenerator::generate_thumbnail(&file_path_clone);
 
+                        let file_size = std::fs::metadata(&file_path_clone).map(|m| m.len()).unwrap_or(0);
+                        
                         // Register in orchestrator for when Accept comes back
                         {
-                            let mut pending = orchestrator.pending_transfers.write().unwrap();
-                            pending.insert(transfer_id.clone(), file_path_clone);
+                            if let Ok(mut pending) = orchestrator.pending_transfers.write() {
+                                pending.insert(transfer_id.clone(), file_path_clone);
+                            }
                         }
 
                         // Send G2gTransferReq via Mesh
                         let _ = orchestrator.send_to_peer(&info.peer_id, crate::mesh::orchestrator::MeshMessage::G2gTransferReq {
                             target_peer_id: info.peer_id.clone(),
                             file_name,
+                            file_size,
                             transfer_id,
                             thumbnail,
                         }).await;
@@ -336,8 +404,14 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
                 return -4;
             }
         }
-        DaemonCommand::AcceptFile { offer_id, peer_id, dest_path } => {
-            let engine = ENGINE.lock().unwrap();
+        DaemonCommand::AcceptFile { offer_id, peer_id, file_size, dest_path } => {
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let orchestrator = state.orchestrator.clone();
                 let _transfer_manager = state.transfer.clone();
@@ -381,7 +455,7 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
                     let _ = crate::quic::server::run_quic_receive(
                         format!("0.0.0.0:{}", listen_port),
                         dest_path_clone,
-                        0, // Expected size from offer
+                        file_size as i64,
                         0, // start_offset (placeholder)
                         &key,
                         0, // hash_output
@@ -400,7 +474,13 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::CancelTransfer { transfer_id } => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let transfer_id_clone = transfer_id.clone();
                 let manager = state.transfer.clone();
@@ -424,16 +504,45 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
                 return -4;
             }
         }
-        DaemonCommand::MarkChatAsRead { peer_id } => {
-            info!("📖 Marking chat with {} as read", peer_id);
-            // This is primarily for the UI, but we could update DB here
+        DaemonCommand::MarkMessagesRead { peer_id } => {
+            info!("📖 Marking messages with {} as read", peer_id);
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
+            if let Some(state) = engine.as_ref() {
+                let _ = state.db.mark_all_messages_read(&peer_id);
+            }
         }
-        DaemonCommand::RejectFile { offer_id: _offer_id, dest_ip: _dest_ip } => {
-            info!("❌ Rejecting file offer {} to {}", _offer_id, _dest_ip);
-            // Send MeshMessage::Reject
+        DaemonCommand::RejectFile { offer_id, peer_id } => {
+            info!("❌ Rejecting file offer {} from {}", offer_id, peer_id);
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
+            if let Some(state) = engine.as_ref() {
+                let orchestrator = state.orchestrator.clone();
+                RUNTIME.spawn(async move {
+                    let _ = orchestrator.send_to_peer(&peer_id, crate::mesh::orchestrator::MeshMessage::G2gTransferReject {
+                        transfer_id: offer_id,
+                    }).await;
+                });
+            }
         }
         DaemonCommand::GenerateCredentials => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let (pin, key) = state.auth.generate_credentials();
                 emit_event(DaemonEvent::CredentialsGenerated { pin, session_key: key });
@@ -442,7 +551,13 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::GenerateQrPayload => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let my_id = state.db.get_config("hydra_peer_id").unwrap_or(None).unwrap_or_else(|| "unknown".to_string());
                 let port = state.orchestrator.get_port();
@@ -454,7 +569,13 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::JoinSession { pin } => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 state.discovery.start_signaling(&pin, state.orchestrator.clone());
             } else {
@@ -462,7 +583,13 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::SetSettings { key, text } => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 info!("⚙️ Setting: {} = {}", key, text);
                 let _ = state.db.set_config(&format!("setting_{}", key), &text);
@@ -471,7 +598,13 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::GetSettings { key } => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let value = state.db.get_config(&format!("setting_{}", key)).unwrap_or(None).unwrap_or_default();
                 emit_event(DaemonEvent::SettingReported { key, value });
@@ -480,7 +613,13 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::GenerateSessionCode => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let code = state.discovery.generate_ldt_code(state.orchestrator.clone());
                 emit_event(DaemonEvent::SessionCodeGenerated { code });
@@ -489,7 +628,13 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::JoinSessionCode { text } => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 state.discovery.join_ldt_session(&text, state.orchestrator.clone());
             } else {
@@ -497,7 +642,13 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::SetDeviceName { name } => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let _ = state.db.set_config("device_name", &name);
                 info!("🏷️ Device name set to: {}", name);
@@ -506,7 +657,13 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::StartDiscovery => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let orchestrator = state.orchestrator.clone();
                 let discovery = state.discovery.clone();
@@ -521,12 +678,106 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::GenerateCode => {
-            let engine = ENGINE.lock().unwrap();
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
             if let Some(state) = engine.as_ref() {
                 let (pin, key) = state.auth.generate_credentials();
                 let ip = state.auth.get_local_ips().first().cloned().unwrap_or_else(|| "127.0.0.1".to_string());
                 emit_event(DaemonEvent::CodeGenerated { key, pin: Some(pin.clone()), ip: ip.clone() });
                 info!("🔑 Generated pair code: {} @ {}", pin, ip);
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::ConnectPeer { peer_id, address, port, encryption_key } => {
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
+            if let Some(state) = engine.as_ref() {
+                let orchestrator = state.orchestrator.clone();
+                let mesh = state.mesh.clone();
+                let db = state.db.clone();
+                
+                info!("🔗 ConnectPeer: Connecting to {} at {}:{}", peer_id, address, port);
+                
+                RUNTIME.spawn(async move {
+                    // Parse address
+                    let socket_addr = match format!("{}:{}", address, port).parse::<std::net::SocketAddr>() {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            error!("❌ Invalid address {}:{}: {}", address, port, e);
+                            return;
+                        }
+                    };
+                    
+                    // Create peer info for mesh
+                    let peer_info = crate::db::PeerInfo {
+                        peer_id: peer_id.clone(),
+                        name: "QR Peer".to_string(), // Will be updated on handshake
+                        ips: vec![socket_addr.ip()],
+                        port,
+                        bt_addr: None,
+                        shared_key: encryption_key.clone(),
+                    };
+                    
+                    // Add to mesh
+                    mesh.update_peer_discovery(peer_info.clone());
+                    
+                    // Save to DB if we have an encryption key
+                    if encryption_key.is_some() {
+                        let _ = db.save_peer(&peer_info);
+                        info!("🔑 Peer saved with encryption key. Initializing secure handshake...");
+                    }
+                    
+                    // Attempt connection
+                    info!("🚀 Initiating connection attempt to {}...", peer_id);
+                    orchestrator.connect_to_peer_multi(peer_id, vec![socket_addr]);
+                });
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::StopDiscovery => {
+            info!("🛑 FFI: StopDiscovery");
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
+            if let Some(state) = engine.as_ref() {
+                let discovery = state.discovery.clone();
+                RUNTIME.spawn(async move {
+                    discovery.stop().await;
+                });
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::DisconnectPeer { peer_id } => {
+            info!("✂️ FFI: DisconnectPeer {}", peer_id);
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
+            if let Some(state) = engine.as_ref() {
+                let orchestrator = state.orchestrator.clone();
+                RUNTIME.spawn(async move {
+                    orchestrator.disconnect_peer(&peer_id).await;
+                });
             } else {
                 return -4;
             }

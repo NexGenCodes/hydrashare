@@ -1,0 +1,3 @@
+rust_input: crate::api
+rust_root: daemon/hydra_muscle
+dart_output: frontend/lib/rust

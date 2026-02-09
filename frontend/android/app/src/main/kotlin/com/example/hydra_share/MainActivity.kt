@@ -14,8 +14,15 @@ import com.example.hydra_share.BluetoothHandler
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.example.hydrashare/p2p"
 
+    private var wifiHandler: WiFiDirectHandler? = null
+    private var bluetoothHandler: BluetoothHandler? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        
+        wifiHandler = WiFiDirectHandler(this)
+        bluetoothHandler = BluetoothHandler(this)
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "openP2PInvitation" -> {
@@ -34,11 +41,17 @@ class MainActivity : FlutterActivity() {
 
         // Register WiFi-Direct Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.hydrashare/wifi_direct")
-            .setMethodCallHandler(WiFiDirectHandler(this))
+            .setMethodCallHandler(wifiHandler)
 
         // Register Bluetooth Channel
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.hydrashare/bluetooth")
-            .setMethodCallHandler(BluetoothHandler(this))
+            .setMethodCallHandler(bluetoothHandler)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        wifiHandler?.cleanup()
+        bluetoothHandler?.cleanup()
     }
 
     private fun startDaemonService() {

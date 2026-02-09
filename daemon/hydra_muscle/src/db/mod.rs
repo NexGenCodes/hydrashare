@@ -68,6 +68,27 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_transfers_status ON transfers(status)",
             [],
         )?;
+        
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                peer_id TEXT,
+                text TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                is_me INTEGER,
+                msg_type TEXT,
+                FOREIGN KEY(peer_id) REFERENCES peers(hydra_id)
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_peer ON messages(peer_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(timestamp)",
+            [],
+        )?;
 
         Ok(())
     }
@@ -135,6 +156,102 @@ impl Database {
         )?;
         Ok(())
     }
+
+    pub fn get_all_peers(&self) -> Result<Vec<PeerInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT hydra_id, name, last_ip, public_port, bt_addr, shared_key FROM peers")?;
+        let rows = stmt.query_map([], |row| {
+            let ips_str: String = row.get(2)?;
+            let ips = ips_str.split(',')
+                .filter_map(|s| s.parse().ok())
+                .collect::<Vec<std::net::IpAddr>>();
+            
+            Ok(PeerInfo {
+                peer_id: row.get(0)?,
+                name: row.get(1)?,
+                ips,
+                port: row.get(3)?,
+                bt_addr: row.get(4).ok(),
+                shared_key: row.get(5).ok(),
+            })
+        })?;
+        
+        let mut peers = Vec::new();
+        for peer in rows {
+            peers.push(peer?);
+        }
+        Ok(peers)
+    }
+    pub fn mark_all_messages_read(&self, _peer_id: &str) -> Result<()> {
+        // Message history is currently stored entirely in the Flutter frontend (StorageService).
+        // This command is a no-op in the daemon for now, but kept for API compatibility.
+        // Future improvements could move message exclusivity to the daemon.
+        info!("mark_all_messages_read: Handled by frontend storage (no-op in daemon).");
+        Ok(())
+    }
+
+    pub fn save_message(&self, msg: &MessageInfo) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, peer_id, text, timestamp, is_me, msg_type) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP, ?4, ?5)",
+            (&msg.id, &msg.peer_id, &msg.text, if msg.is_me { 1 } else { 0 }, &msg.msg_type),
+        )?;
+        Ok(())
+    }
+
+    pub fn get_messages(&self, peer_id: &str) -> Result<Vec<MessageInfo>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, peer_id, text, timestamp, is_me, msg_type FROM messages WHERE peer_id = ?1 ORDER BY timestamp ASC")?;
+        let rows = stmt.query_map([peer_id], |row| {
+            let is_me_int: i32 = row.get(4)?;
+            Ok(MessageInfo {
+                id: row.get(0)?,
+                peer_id: row.get(1)?,
+                text: row.get(2)?,
+                timestamp: row.get(3)?,
+                is_me: is_me_int != 0,
+                msg_type: row.get(5)?,
+            })
+        })?;
+        
+        let mut messages = Vec::new();
+        for msg in rows {
+            messages.push(msg?);
+        }
+        Ok(messages)
+    }
+
+    pub fn cleanup_history(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        
+        // 1. Cleanup messages older than 7 days
+        let msgs_removed = conn.execute(
+            "DELETE FROM messages WHERE timestamp < datetime('now', '-7 days')",
+            [],
+        )?;
+        
+        // 2. Cleanup transfers older than 7 days
+        let transfers_removed = conn.execute(
+            "DELETE FROM transfers WHERE created_at < datetime('now', '-7 days')",
+            [],
+        )?;
+        
+        if msgs_removed > 0 || transfers_removed > 0 {
+            info!("🧹 Database Cleanup: Removed {} messages and {} transfers older than 7 days", msgs_removed, transfers_removed);
+        }
+        
+        Ok(msgs_removed + transfers_removed)
+    }
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]
+pub struct MessageInfo {
+    pub id: String,
+    pub peer_id: String,
+    pub text: String,
+    pub timestamp: String,
+    pub is_me: bool,
+    pub msg_type: String,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Debug)]

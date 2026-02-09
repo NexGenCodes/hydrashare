@@ -49,15 +49,19 @@ impl AuthService {
     }
 
     pub fn generate_credentials(&self) -> (String, String) {
+        info!("🔑 Starting credential generation...");
         let pin = self.generate_pin();
+        info!("🔑 PIN generated: {}", pin);
         
         // Use SPAKE2 for Zero-Knowledge Key Exchange
         // A is the generator (Verifier), B is the joiner (Prover)
+        info!("🔑 Starting SPAKE2 A (Prover)...");
         let (state, msg_a_bytes) = Spake2::<Ed25519Group>::start_a(
             &Password::new(pin.as_bytes()),
             &Identity::new(b"hydra_verifier"),
             &Identity::new(b"hydra_prover")
         );
+        info!("🔑 SPAKE2 A finished.");
         
         let msg_a_b64 = STANDARD.encode(&msg_a_bytes);
 
@@ -140,10 +144,10 @@ impl AuthService {
     }
 
     pub fn generate_session_code(&self, hydra_id: &str, ip: &str, port: u16) -> String {
-        let expires = (std::time::SystemTime::now()
+        let expires = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs() + 86400) as u64;
+            .as_secs() + 86400;
 
         let data = format!("{}|{}|{}|{}", hydra_id, ip, port, expires);
         
@@ -168,21 +172,12 @@ impl AuthService {
         QrHandshakePayload {
             id: hydra_id.to_string(),
             key: temp_key,
-            addrs: self.get_local_ips(),
+            addrs: crate::common::interfaces::list_local_ips().into_iter().map(|ip| ip.to_string()).collect(),
             port,
         }
     }
 
     pub fn get_local_ips(&self) -> Vec<String> {
-        let mut ips = Vec::new();
-        if let Ok(interfaces) = if_addrs::get_if_addrs() {
-            for iface in interfaces {
-                if !iface.is_loopback() {
-                    ips.push(iface.ip().to_string());
-                }
-            }
-        }
-        ips.sort();
-        ips
+        crate::common::interfaces::list_local_ips().into_iter().map(|ip| ip.to_string()).collect()
     }
 }

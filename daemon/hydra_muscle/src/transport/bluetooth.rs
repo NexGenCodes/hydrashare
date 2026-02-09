@@ -11,7 +11,7 @@ impl BluetoothStream {
     #[cfg(windows)]
     pub fn connect(addr: u64, port: u32) -> io::Result<Self> {
         unsafe {
-            let socket = socket(AF_BTH as i32, SOCK_STREAM as i32, BTHPROTO_RFCOMM as i32);
+            let socket = socket(AF_BTH as i32, SOCK_STREAM, BTHPROTO_RFCOMM);
             if socket == INVALID_SOCKET {
                 return Err(io::Error::last_os_error());
             }
@@ -51,7 +51,7 @@ impl BluetoothListener {
     #[cfg(windows)]
     pub fn bind(port: u32) -> io::Result<Self> {
         unsafe {
-            let socket = socket(AF_BTH as i32, SOCK_STREAM as i32, BTHPROTO_RFCOMM as i32);
+            let socket = socket(AF_BTH as i32, SOCK_STREAM, BTHPROTO_RFCOMM);
             if socket == INVALID_SOCKET {
                 return Err(io::Error::last_os_error());
             }

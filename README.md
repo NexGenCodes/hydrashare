@@ -34,6 +34,7 @@ HydraShare is a modern peer-to-peer file sharing application that enables seamle
 - **mDNS Discovery**: Automatic peer discovery on local networks
 - **QUIC-Only Protocol**: Single, unified protocol for handshakes, chat, and files
 - **IPv6 Ready**: Full dual-stack support for modern network environments
+- **Code Quality**: Strict `cargo clippy` and `flutter analyze` compliance across the entire codebase
 
 ## 🏗️ Architecture
 
@@ -59,7 +60,7 @@ graph TD
 
 ## 📦 Project Structure
 
-```
+```text
 hydrashare/
 ├── daemon/                 # Rust backend engine
 │   ├── hydra_muscle/      # Main logic crate
@@ -220,4 +221,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-**Made with ❤️ by the HydraShare Team**
+### Made with ❤️ by the HydraShare Team

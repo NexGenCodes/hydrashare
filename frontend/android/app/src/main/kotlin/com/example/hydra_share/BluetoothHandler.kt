@@ -113,4 +113,15 @@ class BluetoothHandler(private val context: Context) : MethodChannel.MethodCallH
             // Ignore
         }
     }
+    fun cleanup() {
+        if (isReceiverRegistered) {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (e: Exception) {
+                // Ignore
+            }
+            isReceiverRegistered = false
+        }
+        disconnect()
+    }
 }

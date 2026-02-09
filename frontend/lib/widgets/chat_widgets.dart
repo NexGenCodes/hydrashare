@@ -30,7 +30,7 @@ class ChatBubble extends StatelessWidget {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 2,
               offset: const Offset(0, 1),
             ),
@@ -55,8 +55,8 @@ class ChatBubble extends StatelessWidget {
               '${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}',
               style: TextStyle(
                 color: isMe
-                    ? theme.colorScheme.onPrimary.withOpacity(0.7)
-                    : theme.colorScheme.onSurface.withOpacity(0.5),
+                    ? theme.colorScheme.onPrimary.withValues(alpha: 0.7)
+                    : theme.colorScheme.onSurface.withValues(alpha: 0.5),
                 fontSize: 10,
               ),
             ),
@@ -75,6 +75,7 @@ class FileTransferBubble extends StatelessWidget {
   final String status;
   final double speed;
   final int totalSize;
+  final VoidCallback? onCancel;
 
   const FileTransferBubble({
     super.key,
@@ -85,6 +86,7 @@ class FileTransferBubble extends StatelessWidget {
     required this.status,
     this.speed = 0.0,
     this.totalSize = 0,
+    this.onCancel,
   });
 
   String _formatSize(int bytes) {
@@ -110,10 +112,12 @@ class FileTransferBubble extends StatelessWidget {
               ? theme.colorScheme.primaryContainer
               : theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: theme.colorScheme.primary.withOpacity(0.1)),
+          border: Border.all(
+            color: theme.colorScheme.primary.withValues(alpha: 0.1),
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -149,7 +153,9 @@ class FileTransferBubble extends StatelessWidget {
               borderRadius: BorderRadius.circular(4),
               child: LinearProgressIndicator(
                 value: progress,
-                backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
+                backgroundColor: theme.colorScheme.primary.withValues(
+                  alpha: 0.1,
+                ),
                 valueColor: AlwaysStoppedAnimation<Color>(
                   theme.colorScheme.primary,
                 ),
@@ -167,7 +173,9 @@ class FileTransferBubble extends StatelessWidget {
                       status,
                       style: TextStyle(
                         fontSize: 10,
-                        color: theme.colorScheme.onSurface.withOpacity(0.6),
+                        color: theme.colorScheme.onSurface.withValues(
+                          alpha: 0.6,
+                        ),
                       ),
                     ),
                     if (progress > 0 && progress < 1)
@@ -175,7 +183,9 @@ class FileTransferBubble extends StatelessWidget {
                         '${speed.toStringAsFixed(1)} MB/s • ${_formatSize(totalSize)}',
                         style: TextStyle(
                           fontSize: 10,
-                          color: theme.colorScheme.onSurface.withOpacity(0.7),
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.7,
+                          ),
                         ),
                       ),
                   ],
@@ -184,9 +194,30 @@ class FileTransferBubble extends StatelessWidget {
                   '${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}',
                   style: TextStyle(
                     fontSize: 10,
-                    color: theme.colorScheme.onSurface.withOpacity(0.6),
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                   ),
                 ),
+
+                if (onCancel != null &&
+                    status != 'Completed' &&
+                    status != 'Cancelled' &&
+                    status != 'Failed' &&
+                    status != 'Rejected')
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: InkWell(
+                      onTap: onCancel,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(
+                          Icons.cancel_outlined,
+                          size: 20,
+                          color: theme.colorScheme.error.withValues(alpha: 0.8),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ],
@@ -222,10 +253,12 @@ class FileOfferBubble extends StatelessWidget {
         decoration: BoxDecoration(
           color: theme.colorScheme.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: theme.colorScheme.primary.withOpacity(0.2)),
+          border: Border.all(
+            color: theme.colorScheme.primary.withValues(alpha: 0.2),
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),

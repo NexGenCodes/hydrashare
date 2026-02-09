@@ -91,7 +91,7 @@ pub async fn run_quic_transfer(
 
         let worker = crate::system::runtime::RUNTIME.spawn(async move {
             let mut send = conn.open_uni().await.map_err(|_| ERROR_QUIC_ERROR)?;
-            send.write_all(&(tid.as_bytes().len() as u32).to_be_bytes()).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
+            send.write_all(&(tid.len() as u32).to_be_bytes()).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
             send.write_all(tid.as_bytes()).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
             send.write_all(&master_nonce).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
 
@@ -100,7 +100,11 @@ pub async fn run_quic_transfer(
 
             loop {
                 if let Some(ref c) = cancel { if c.load(Ordering::Relaxed) != 0 { return Err(ERROR_CANCELLED); } }
-                let health = crate::system::INTELLIGENCE.read().unwrap().get_health();
+                let health = if let Ok(guard) = crate::system::INTELLIGENCE.read() {
+                    guard.get_health()
+                } else {
+                    crate::system::SystemHealth::Optimal
+                };
                 if health != crate::system::SystemHealth::Optimal {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 }
@@ -113,11 +117,11 @@ pub async fn run_quic_transfer(
                 let mut plaintext = vec![0u8; bytes_to_read];
                 file.seek(std::io::SeekFrom::Start(offset)).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
                 file.read_exact(&mut plaintext).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
-                { let mut h = hasher.lock().unwrap(); h.update(&plaintext); }
+                if let Ok(mut h) = hasher.lock() { h.update(&plaintext); }
 
                 let mut is_compressed = false;
                 let mut data_to_encrypt = plaintext;
-                if is_compressible(&*f_path) {
+                if is_compressible(&f_path) {
                     if let Ok(compressed) = zstd::encode_all(&data_to_encrypt[..], 3) {
                         if compressed.len() < data_to_encrypt.len() { data_to_encrypt = compressed; is_compressed = true; }
                     }
@@ -215,7 +219,7 @@ pub async fn run_quic_transfer_fd(
 
         let worker = crate::system::runtime::RUNTIME.spawn(async move {
             let mut send = conn.open_uni().await.map_err(|_| ERROR_QUIC_ERROR)?;
-            send.write_all(&(tid.as_bytes().len() as u32).to_be_bytes()).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
+            send.write_all(&(tid.len() as u32).to_be_bytes()).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
             send.write_all(tid.as_bytes()).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
             send.write_all(&master_nonce).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
             let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| ERROR_CRYPTO_FAILED)?;
@@ -233,7 +237,7 @@ pub async fn run_quic_transfer_fd(
                 { let mut h = hasher.lock().unwrap(); h.update(&plaintext); }
                 let mut is_compressed = false;
                 let mut data_to_encrypt = plaintext;
-                if is_compressible(&*f_path) {
+                if is_compressible(&f_path) {
                     if let Ok(compressed) = zstd::encode_all(&data_to_encrypt[..], 3) {
                         if compressed.len() < data_to_encrypt.len() { data_to_encrypt = compressed; is_compressed = true; }
                     }
@@ -360,7 +364,7 @@ pub async fn run_quic_transfer_session(
 
         let worker = crate::system::runtime::RUNTIME.spawn(async move {
             let mut send = conn.open_uni().await.map_err(|_| ERROR_QUIC_ERROR)?;
-            send.write_all(&(tid.as_bytes().len() as u32).to_be_bytes()).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
+            send.write_all(&(tid.len() as u32).to_be_bytes()).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
             send.write_all(tid.as_bytes()).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
             send.write_all(&master_nonce).await.map_err(|_| ERROR_TRANSFER_FAILED)?;
             let cipher = Aes256Gcm::new_from_slice(&key).map_err(|_| ERROR_CRYPTO_FAILED)?;
@@ -382,7 +386,7 @@ pub async fn run_quic_transfer_session(
                 { let mut h = hasher.lock().unwrap(); h.update(&plaintext); }
                 let mut is_compressed = false;
                 let mut data_to_encrypt = plaintext;
-                if is_compressible(&*f_path) {
+                if is_compressible(&f_path) {
                     if let Ok(compressed) = zstd::encode_all(&data_to_encrypt[..], 3) {
                         if compressed.len() < data_to_encrypt.len() { data_to_encrypt = compressed; is_compressed = true; }
                     }

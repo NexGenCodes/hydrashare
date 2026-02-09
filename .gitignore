@@ -12,13 +12,21 @@ desktop.ini
 *~
 *.bak
 *.tmp
-*.log
 cargo_errors*.txt
 build_log.txt
 build_err*.txt
 build_panic.txt
 final_err.txt
 err.txt
+clippy_*.txt
+clippy_output.txt
+clippy_report.txt
+clippy_sample.txt
+build_errors*.txt
+cargo_check.log
+bench_input.dat
+*.dat
+*.log
 
 # Environment
 .env

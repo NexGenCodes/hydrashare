@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 class SqliteService {
   static final SqliteService _instance = SqliteService._internal();
@@ -109,7 +110,7 @@ class SqliteService {
       whereArgs: [sevenDaysAgo],
     );
     if (count > 0) {
-      print('🗑️ SQLite Scrubber: Deleted $count old messages');
+      debugPrint('🗑️ SQLite Scrubber: Deleted $count old messages');
     }
   }
 }

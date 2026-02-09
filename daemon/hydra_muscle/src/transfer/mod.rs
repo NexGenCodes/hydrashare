@@ -104,11 +104,7 @@ impl TransferManager {
             session.status = TransferStatus::Running;
             
             // 2. Throttle DB Updates (every 5MB)
-            let bytes_since_db_update = if transferred > session.last_db_write { 
-                transferred - session.last_db_write 
-            } else { 
-                0 
-            };
+            let bytes_since_db_update = transferred.saturating_sub(session.last_db_write);
             
             if bytes_since_db_update >= 5 * 1024 * 1024 || transferred == session.file_size {
                 let db = self.db.clone();

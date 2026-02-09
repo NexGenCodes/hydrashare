@@ -8,6 +8,7 @@ import '../services/daemon_service.dart';
 import 'qr_scanner_screen.dart';
 import 'home_screen.dart';
 import '../widgets/adaptive_layout.dart';
+import '../widgets/scale_button.dart';
 import '../core/utils/platform_utils.dart';
 
 class ManualPairingScreen extends StatefulWidget {
@@ -73,6 +74,7 @@ class _ManualPairingScreenState extends State<ManualPairingScreen> {
   }
 
   Future<void> _handleConnect() async {
+    HapticFeedback.lightImpact();
     final pin = _pinController.text.trim();
     if (pin.isEmpty || pin.length != 6) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -136,12 +138,19 @@ class _ManualPairingScreenState extends State<ManualPairingScreen> {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withOpacity(0.1),
+              color: theme.colorScheme.primary.withValues(alpha: 0.08),
               shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
             child: Icon(
               Icons.dialpad_rounded,
-              size: 64,
+              size: 56,
               color: theme.colorScheme.primary,
             ),
           ),
@@ -158,7 +167,7 @@ class _ManualPairingScreenState extends State<ManualPairingScreen> {
           Text(
             'Enter the 6-digit PIN from the host device to securely connect.',
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withOpacity(0.6),
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
               height: 1.5,
             ),
             textAlign: TextAlign.center,
@@ -183,7 +192,7 @@ class _ManualPairingScreenState extends State<ManualPairingScreen> {
               counterText: '',
               hintText: '000000',
               hintStyle: TextStyle(
-                color: theme.colorScheme.primary.withOpacity(0.1),
+                color: theme.colorScheme.primary.withValues(alpha: 0.1),
               ),
               contentPadding: const EdgeInsets.symmetric(vertical: 24),
             ),
@@ -195,18 +204,46 @@ class _ManualPairingScreenState extends State<ManualPairingScreen> {
           SizedBox(
             width: double.infinity,
             height: 64,
-            child: ElevatedButton(
-              onPressed: _isConnecting ? null : _handleConnect,
-              child: _isConnecting
-                  ? const SizedBox(
-                      height: 24,
-                      width: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            child: ScaleButton(
+              onTap: _isConnecting ? null : _handleConnect,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _isConnecting
+                      ? theme.disabledColor
+                      : theme.colorScheme.primary,
+                  borderRadius: BorderRadius.circular(32),
+                  boxShadow: _isConnecting
+                      ? []
+                      : [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.2),
+                            spreadRadius: 0,
+                            blurRadius: 16,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                ),
+                alignment: Alignment.center,
+                child: _isConnecting
+                    ? const SizedBox(
+                        height: 24,
+                        width: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : const Text(
+                        'Connect to Peer',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    )
-                  : const Text('Connect to Peer'),
+              ),
             ),
           ),
 
@@ -215,8 +252,8 @@ class _ManualPairingScreenState extends State<ManualPairingScreen> {
           // Alternative QR scan option - Hidden if no camera is detected
           if (!_isCheckingCamera && _hasCamera)
             Center(
-              child: TextButton.icon(
-                onPressed: _isConnecting
+              child: ScaleButton(
+                onTap: _isConnecting
                     ? null
                     : () {
                         Navigator.pushReplacement(
@@ -226,15 +263,25 @@ class _ManualPairingScreenState extends State<ManualPairingScreen> {
                           ),
                         );
                       },
-                icon: Icon(
-                  Icons.qr_code_scanner_rounded,
-                  color: theme.colorScheme.primary,
-                ),
-                label: Text(
-                  'Scan QR Code Instead',
-                  style: TextStyle(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w600,
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.qr_code_scanner_rounded,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Scan QR Code Instead',
+                        style: TextStyle(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

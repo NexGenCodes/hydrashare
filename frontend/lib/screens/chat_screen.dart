@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import '../services/daemon_service.dart';
 import '../widgets/adaptive_layout.dart';
 import '../widgets/chat_widgets.dart';
@@ -25,18 +26,19 @@ class _ChatScreenState extends State<ChatScreen> {
   StreamSubscription? _subscription;
   final Map<String, _TransferStat> _transferStats = {};
 
-  String get _peerIp => widget.peer['ip'] ?? widget.peer['dest_ip'] ?? '';
+  String get _peerId => widget.peer['id'] ?? widget.peer['ip'] ?? '';
   String get _peerName => widget.peer['name'] ?? 'Unknown Peer';
 
   @override
   void initState() {
     super.initState();
     _loadMessages();
+    widget.daemonService.markAsRead(_peerId);
     _setupSubscription();
   }
 
   Future<void> _loadMessages() async {
-    final msgs = await widget.daemonService.getMessages(_peerIp);
+    final msgs = await widget.daemonService.getMessages(_peerId);
     if (!mounted) return;
     setState(() {
       _messages = msgs;
@@ -47,12 +49,19 @@ class _ChatScreenState extends State<ChatScreen> {
   void _setupSubscription() {
     _subscription = widget.daemonService.responses.listen((response) {
       if (response['type'] == 'CHAT_MESSAGE' &&
-          response['from_ip'] == _peerIp) {
+          response['from_ip'] == _peerId) {
         _loadMessages();
+        widget.daemonService.markAsRead(_peerId);
       } else if (response['type'] == 'FILE_TRANSFER_PROGRESS') {
         final payload = response['payload'];
         if (payload != null) {
           _updateTransferProgress(payload);
+        }
+      } else if (response['type'] == 'TRANSFER_COMPLETE') {
+        final transferId = response['transfer_id'];
+        final status = response['status'];
+        if (transferId != null && status != null) {
+          _updateTransferStatus(transferId, status);
         }
       }
     });
@@ -94,6 +103,21 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _updateTransferStatus(String transferId, String status) {
+    setState(() {
+      final msgIndex = _messages.indexWhere(
+        (m) => m['transfer_id'] == transferId,
+      );
+      if (msgIndex != -1) {
+        _messages[msgIndex]['status'] = status;
+        _messages[msgIndex]['speed'] = 0.0;
+        if (status == 'Completed') {
+          _messages[msgIndex]['progress'] = 100.0;
+        }
+      }
+    });
+  }
+
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
@@ -118,9 +142,18 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
-    widget.daemonService.sendMessage(_peerIp, text);
+    widget.daemonService.sendMessage(_peerId, text);
     _messageController.clear();
     _loadMessages();
+  }
+
+  Future<void> _pickFile() async {
+    final result = await FilePicker.platform.pickFiles();
+    if (result != null && result.files.single.path != null) {
+      final path = result.files.single.path!;
+      await widget.daemonService.sendFile(_peerId, path);
+      _loadMessages();
+    }
   }
 
   @override
@@ -133,9 +166,7 @@ class _ChatScreenState extends State<ChatScreen> {
       actions: [
         IconButton(
           icon: const Icon(Icons.attach_file_rounded),
-          onPressed: () {
-            // TODO: Implement file picking
-          },
+          onPressed: _pickFile,
         ),
       ],
       useScrollView: false,
@@ -162,6 +193,9 @@ class _ChatScreenState extends State<ChatScreen> {
                         status: msg['status'] ?? '',
                         speed: msg['speed'] ?? 0.0,
                         totalSize: msg['total'] ?? 0,
+                        onCancel: () => widget.daemonService.cancelTransfer(
+                          msg['transfer_id'],
+                        ),
                       );
                     }
                     if (msg['type'] == 'file_offer' && !msg['isMe']) {
@@ -170,11 +204,12 @@ class _ChatScreenState extends State<ChatScreen> {
                         offerId: msg['extra']?['offer_id'] ?? '',
                         onAccept: () => widget.daemonService.acceptFile(
                           msg['extra']?['offer_id'],
-                          _peerIp,
+                          _peerId,
+                          msg['extra']?['file_size'] ?? 0,
                         ),
                         onReject: () => widget.daemonService.rejectFile(
                           msg['extra']?['offer_id'],
-                          _peerIp,
+                          _peerId,
                         ),
                       );
                     }
@@ -201,7 +236,7 @@ class _ChatScreenState extends State<ChatScreen> {
         color: theme.cardColor,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),

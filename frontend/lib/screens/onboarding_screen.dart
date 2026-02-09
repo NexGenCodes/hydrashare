@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'role_selection_screen.dart';
 import '../widgets/adaptive_layout.dart';
+import '../widgets/scale_button.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -85,7 +86,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           Container(
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withOpacity(0.1),
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(item.icon, size: 100, color: theme.colorScheme.primary),
@@ -103,7 +104,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           Text(
             item.description,
             style: theme.textTheme.bodyLarge?.copyWith(
-              color: theme.colorScheme.onSurface.withOpacity(0.6),
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
               height: 1.6,
             ),
             textAlign: TextAlign.center,
@@ -115,7 +116,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   Widget _buildFooter(ThemeData theme) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(40, 20, 40, 40),
+      padding: const EdgeInsets.fromLTRB(40, 0, 40, 30),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -127,35 +128,56 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
           ),
           const SizedBox(height: 32),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                if (_currentPage < _items.length - 1) {
-                  _pageController.nextPage(
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeInOut,
-                  );
-                } else {
-                  _completeOnboarding();
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 20),
+          ScaleButton(
+            onTap: () {
+              if (_currentPage < _items.length - 1) {
+                _pageController.nextPage(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                );
+              } else {
+                _completeOnboarding();
+              }
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary,
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.2),
+                    spreadRadius: 0,
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
+              alignment: Alignment.center,
               child: Text(
                 _currentPage < _items.length - 1 ? 'Next' : 'Get Started',
+                style: TextStyle(
+                  color: theme.colorScheme.onPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
+                ),
               ),
             ),
           ),
           const SizedBox(height: 16),
-          TextButton(
-            onPressed: _completeOnboarding,
-            child: Text(
-              'Skip',
-              style: TextStyle(
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.w600,
+          ScaleButton(
+            onTap: _completeOnboarding,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text(
+                'Skip',
+                style: TextStyle(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
             ),
           ),
@@ -180,7 +202,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         decoration: BoxDecoration(
           color: isActive
               ? theme.colorScheme.primary
-              : theme.colorScheme.primary.withOpacity(0.2),
+              : theme.colorScheme.primary.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(4),
         ),
       ),

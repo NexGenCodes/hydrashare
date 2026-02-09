@@ -28,7 +28,7 @@ impl rustls::client::danger::ServerCertVerifier for HydraCertVerifier {
             .map_err(|_| rustls::Error::InvalidCertificate(rustls::CertificateError::BadEncoding))?;
         
         let spki = cert.public_key();
-        let pub_key_bytes = spki.raw.as_ref();
+        let pub_key_bytes = spki.raw;
 
         let actual_id = base64::engine::general_purpose::STANDARD.encode(pub_key_bytes);
         
@@ -64,6 +64,12 @@ impl rustls::client::danger::ServerCertVerifier for HydraCertVerifier {
 
 #[derive(Debug)]
 pub struct SkipServerVerification;
+impl Default for SkipServerVerification {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SkipServerVerification {
     pub fn new() -> Self { SkipServerVerification }
 }

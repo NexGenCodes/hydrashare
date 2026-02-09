@@ -1,13 +1,31 @@
-# HydraShare Daemon - Central Build Script
-# Usage: .\build.ps1 [-Windows] [-Android] [-All]
-
 param (
     [switch]$Android,
     [switch]$Windows,
-    [switch]$All
+    [switch]$All,
+    [switch]$Clean
 )
 
 $ScriptDir = $PSScriptRoot
+$ProjectRoot = Resolve-Path "$ScriptDir\.."
+
+# Optional: Deep Clean
+if ($Clean) {
+    Write-Host "`n>> Performing Deep Clean..." -ForegroundColor Yellow
+    cd "$ProjectRoot\frontend"
+    flutter clean
+    cd $ProjectRoot
+    # Cargo is cleaned as part of the individual build scripts if needed
+}
+
+# Always perform Codegen to ensure sync
+Write-Host "`n>> Running FRB Codegen..." -ForegroundColor Cyan
+cd $ProjectRoot
+flutter_rust_bridge_codegen generate
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Codegen failed. Aborting build." -ForegroundColor Red
+    exit 1
+}
 
 if ($All) {
     Write-Host "`n=== BUILDING ALL PLATFORMS ===" -ForegroundColor Cyan

@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../services/daemon_service.dart';
 import '../widgets/adaptive_layout.dart';
-import '../core/utils/platform_utils.dart';
+import 'package:flutter/services.dart';
+import 'dart:convert';
 
 class QrHandshakeScreen extends StatefulWidget {
   final DaemonService daemonService;
@@ -39,14 +40,20 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
         await widget.daemonService.connect();
       }
 
-      // Generate pairing code and get host IP
-      final result = await widget.daemonService.generateCodeWithIP();
+      // Generate both QR payload (Smart JSON) and PIN (Manual)
+      final results = await Future.wait([
+        widget.daemonService.generateQrPayload(),
+        widget.daemonService.generateCodeWithIP(),
+      ]);
+
+      final qrMap = results[0];
+      final pinMap = results[1];
 
       if (mounted) {
         setState(() {
-          _pin = result['pin'];
-          // Expected format for guest scanner: "ip|key"
-          _qrData = "${result['ip']}|${result['key']}";
+          _pin = pinMap['pin'];
+          // Use JSON payload for Smart QR
+          _qrData = jsonEncode(qrMap);
           _isLoading = false;
         });
       }
@@ -70,13 +77,53 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDesktop = PlatformUtils.isMediumScreen(context);
+    final width = MediaQuery.of(context).size.width;
+    // User requested "mobile layout" to avoid wrapping - increasing breakpoint to 900
+    final isDesktop = width > 900;
 
     return AdaptiveLayout(
       title: 'Host Connection',
       scrollController: _scrollController,
       maxWidth: isDesktop ? 1000 : 500,
       child: _buildBody(theme, isDesktop),
+    );
+  }
+
+  // ... (keeping _buildBody and other methods as is until _buildPinSection)
+
+  Widget _buildPinSection(ThemeData theme, String pin, bool isDesktop) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          'MANUAL PIN',
+          style: theme.textTheme.labelSmall?.copyWith(
+            letterSpacing: 2,
+            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primary.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
+            ),
+          ),
+          child: Text(
+            pin,
+            style: theme.textTheme.headlineMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              letterSpacing: 6,
+              color: theme.colorScheme.primary,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -91,7 +138,7 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
             Text(
               'Generating secure codes...',
               style: theme.textTheme.bodyLarge?.copyWith(
-                color: theme.colorScheme.onSurface.withOpacity(0.6),
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
               ),
             ),
           ],
@@ -115,12 +162,15 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
               _errorMessage!,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withOpacity(0.6),
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
               ),
             ),
             const SizedBox(height: 32),
             ElevatedButton.icon(
-              onPressed: _initializePairing,
+              onPressed: () {
+                HapticFeedback.lightImpact();
+                _initializePairing();
+              },
               icon: const Icon(Icons.refresh),
               label: const Text('Try Again'),
             ),
@@ -190,7 +240,7 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
         Text(
           'Other devices can join your network by scanning the QR code or entering the PIN below.',
           style: theme.textTheme.bodyLarge?.copyWith(
-            color: theme.colorScheme.onSurface.withOpacity(0.6),
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
             height: 1.5,
           ),
           textAlign: TextAlign.center,
@@ -206,26 +256,31 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(32),
         side: BorderSide(
-          color: theme.colorScheme.primary.withOpacity(0.1),
+          color: theme.colorScheme.primary.withValues(alpha: 0.1),
           width: 2,
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: EdgeInsets.all(isDesktop ? 32 : 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            QrImageView(
-              data: qrData,
-              version: QrVersions.auto,
-              size: 280.0,
-              eyeStyle: const QrEyeStyle(
-                eyeShape: QrEyeShape.circle,
-                color: Colors.black,
-              ),
-              dataModuleStyle: const QrDataModuleStyle(
-                dataModuleShape: QrDataModuleShape.circle,
-                color: Colors.black87,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 280),
+              child: AspectRatio(
+                aspectRatio: 1.0,
+                child: QrImageView(
+                  data: qrData,
+                  version: QrVersions.auto,
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.circle,
+                    color: Colors.black,
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.circle,
+                    color: Colors.black87,
+                  ),
+                ),
               ),
             ),
             if (!isDesktop) ...[
@@ -241,42 +296,6 @@ class _QrHandshakeScreenState extends State<QrHandshakeScreen> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildPinSection(ThemeData theme, String pin, bool isDesktop) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Text(
-          'MANUAL PIN',
-          style: theme.textTheme.labelSmall?.copyWith(
-            letterSpacing: 2,
-            fontWeight: FontWeight.bold,
-            color: theme.colorScheme.onSurface.withOpacity(0.5),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: theme.colorScheme.primary.withOpacity(0.1),
-            ),
-          ),
-          child: Text(
-            pin,
-            style: theme.textTheme.displayMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              letterSpacing: 12,
-              color: theme.colorScheme.primary,
-              fontFamily: 'monospace',
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

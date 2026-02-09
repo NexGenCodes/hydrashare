@@ -11,14 +11,9 @@ import 'package:provider/provider.dart';
 import 'package:hydra_share/providers/theme_provider.dart';
 
 import 'package:hydra_share/main.dart';
-import 'package:hydra_share/services/rust_daemon_ffi.dart';
-import 'package:hydra_share/services/daemon_service.dart';
 
 void main() {
   testWidgets('App Start smoke test', (WidgetTester tester) async {
-    // Enable Mock Mode for FFI
-    HydraMuscleFfi.isMockMode = true;
-
     // Build our app and trigger a frame.
     await tester.pumpWidget(
       ChangeNotifierProvider(
@@ -29,9 +24,5 @@ void main() {
 
     // Verify that the app title or a key widget exists
     expect(find.byType(MaterialApp), findsOneWidget);
-
-    // Cleanup: Stop the engine to cancel timers
-    await DaemonService().stopDiscovery();
-    HydraMuscleFfi.stopEngine();
   });
 }

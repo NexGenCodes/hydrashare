@@ -9,6 +9,7 @@ import '../providers/theme_provider.dart';
 import 'qr_handshake_screen.dart';
 import 'qr_scanner_screen.dart';
 import '../widgets/warning_banner.dart';
+import '../widgets/scale_button.dart';
 
 class HomeScreen extends StatefulWidget {
   final DaemonService daemonService;
@@ -67,8 +68,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               );
             }
 
-            return WillPopScope(
-              onWillPop: _onWillPop,
+            return PopScope(
+              canPop: false,
+              onPopInvokedWithResult: (didPop, result) async {
+                if (didPop) return;
+                final shouldPop = await _onWillPop();
+                if (shouldPop && context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
               child: _buildMobileLayout(
                 connectedPeers,
                 discoveredPeers,
@@ -96,7 +104,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   style: TextStyle(
                     color: Theme.of(
                       context,
-                    ).colorScheme.onSurface.withOpacity(0.6),
+                    ).colorScheme.onSurface.withValues(alpha: 0.6),
                   ),
                 ),
               ),
@@ -147,7 +155,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   child: Text(
                     'CONNECTED DEVICES',
                     style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurface.withOpacity(0.5),
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.5,
                     ),
@@ -167,14 +175,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           Icon(
                             Icons.radar_rounded,
                             size: 64,
-                            color: theme.colorScheme.primary.withOpacity(0.2),
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.2,
+                            ),
                           ),
                           const SizedBox(height: 24),
                           Text(
                             'No devices connected',
                             style: theme.textTheme.titleMedium?.copyWith(
-                              color: theme.colorScheme.onSurface.withOpacity(
-                                0.5,
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.5,
                               ),
                               fontWeight: FontWeight.bold,
                             ),
@@ -184,8 +194,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             'Devices in your network will appear here.',
                             textAlign: TextAlign.center,
                             style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurface.withOpacity(
-                                0.4,
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.4,
                               ),
                             ),
                           ),
@@ -209,7 +219,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       child: Text(
                         'NEARBY DEVICES',
                         style: theme.textTheme.labelMedium?.copyWith(
-                          color: theme.colorScheme.onSurface.withOpacity(0.5),
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.5,
+                          ),
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1.5,
                         ),
@@ -272,7 +284,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       Text(
                         'DEVICES',
                         style: theme.textTheme.labelMedium?.copyWith(
-                          color: theme.colorScheme.onSurface.withOpacity(0.5),
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.5,
+                          ),
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1.5,
                         ),
@@ -285,7 +299,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: theme.colorScheme.primary.withOpacity(0.1),
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.1,
+                            ),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Text(
@@ -317,9 +333,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             isDark,
                             isSelected:
                                 _selectedPeer != null &&
-                                (_selectedPeer!['ip'] ??
-                                        _selectedPeer!['dest_ip']) ==
-                                    (peer['ip'] ?? peer['dest_ip']),
+                                (_selectedPeer!['id'] ??
+                                        _selectedPeer!['ip']) ==
+                                    (peer['id'] ?? peer['ip']),
                             onTap: () => setState(() => _selectedPeer = peer),
                           ),
                         ),
@@ -329,8 +345,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             child: Text(
                               'NEARBY',
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.onSurface.withOpacity(
-                                  0.5,
+                                color: theme.colorScheme.onSurface.withValues(
+                                  alpha: 0.5,
                                 ),
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 1.2,
@@ -366,15 +382,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           Container(
                             padding: const EdgeInsets.all(32),
                             decoration: BoxDecoration(
-                              color: theme.colorScheme.primary.withOpacity(
-                                0.05,
+                              color: theme.colorScheme.primary.withValues(
+                                alpha: 0.05,
                               ),
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
                               Icons.chat_bubble_outline_rounded,
                               size: 80,
-                              color: theme.colorScheme.primary.withOpacity(0.2),
+                              color: theme.colorScheme.primary.withValues(
+                                alpha: 0.2,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -382,8 +400,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                             'Seamless File Sharing',
                             style: theme.textTheme.headlineSmall?.copyWith(
                               fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.onSurface.withOpacity(
-                                0.8,
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.8,
                               ),
                             ),
                           ),
@@ -391,8 +409,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           Text(
                             'Select a device to start chatting and sharing files',
                             style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurface.withOpacity(
-                                0.5,
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.5,
                               ),
                             ),
                           ),
@@ -401,7 +419,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     )
                   : ChatScreen(
                       key: ValueKey(
-                        _selectedPeer!['ip'] ?? _selectedPeer!['dest_ip'],
+                        _selectedPeer!['id'] ?? _selectedPeer!['ip'],
                       ),
                       peer: _selectedPeer!,
                       daemonService: widget.daemonService,
@@ -430,9 +448,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: theme.colorScheme.primary.withOpacity(0.3),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
+                color: Colors.black.withValues(alpha: 0.2),
+                spreadRadius: 0,
+                blurRadius: 16,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
@@ -459,14 +478,42 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  FloatingActionButton _buildAddDeviceFAB(ThemeData theme) {
-    if (Platform.isWindows) return const FloatingActionButton(onPressed: null);
-    return FloatingActionButton.extended(
-      onPressed: _showAddDeviceModal,
-      label: const Text('Add Device'),
-      icon: const Icon(Icons.add_rounded),
-      backgroundColor: theme.colorScheme.primary,
-      foregroundColor: Colors.white,
+  Widget _buildAddDeviceFAB(ThemeData theme) {
+    if (Platform.isWindows) return const SizedBox.shrink();
+    return ScaleButton(
+      onTap: () {
+        _showAddDeviceModal();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              spreadRadius: 0,
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add_rounded, color: Colors.white),
+            SizedBox(width: 12),
+            Text(
+              'Add Device',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -565,7 +612,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
+                color: color.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, color: color, size: 24),
@@ -583,7 +630,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     subtitle,
                     style: TextStyle(
                       fontSize: 13,
-                      color: theme.colorScheme.onSurface.withOpacity(0.6),
+                      color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                     ),
                   ),
                 ],
@@ -591,7 +638,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
             Icon(
               Icons.chevron_right_rounded,
-              color: theme.colorScheme.onSurface.withOpacity(0.3),
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
             ),
           ],
         ),
@@ -617,7 +664,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         IconButton(
           icon: Icon(
             Icons.settings_outlined,
-            color: theme.colorScheme.onSurface.withOpacity(0.8),
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
           ),
           onPressed: () {
             Navigator.push(
@@ -636,7 +683,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 themeProvider.themeMode == ThemeMode.dark
                     ? Icons.light_mode_rounded
                     : Icons.dark_mode_rounded,
-                color: theme.colorScheme.onSurface.withOpacity(0.8),
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.8),
               ),
               onPressed: () => themeProvider.toggleTheme(),
             );
@@ -653,7 +700,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       leading: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: theme.colorScheme.primary.withOpacity(0.1),
+          color: theme.colorScheme.primary.withValues(alpha: 0.1),
           shape: BoxShape.circle,
         ),
         child: Icon(Icons.campaign_rounded, color: theme.colorScheme.primary),
@@ -692,14 +739,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     bool isDiscovered = false,
     VoidCallback? onTap,
   }) {
-    final ip = peer['ip'] ?? peer['dest_ip'] ?? 'Unknown IP';
+    final id = peer['id'] ?? peer['ip'] ?? 'Unknown Device';
     final name = peer['name'] ?? 'Nearby Device';
     final unreadCount = peer['unread_count'] ?? 0;
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
-        color: isSelected ? theme.colorScheme.primary.withOpacity(0.1) : null,
+        color: isSelected
+            ? theme.colorScheme.primary.withValues(alpha: 0.1)
+            : null,
         borderRadius: BorderRadius.circular(16),
       ),
       child: ListTile(
@@ -711,7 +760,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           isLabelVisible: unreadCount > 0,
           backgroundColor: theme.colorScheme.secondary,
           child: CircleAvatar(
-            backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
+            backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
             child: Icon(
               Icons.devices_rounded,
               color: theme.colorScheme.primary,
@@ -727,10 +776,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
         ),
         subtitle: Text(
-          ip,
+          id,
           style: TextStyle(
             fontSize: 12,
-            color: theme.colorScheme.onSurface.withOpacity(0.6),
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
           ),
         ),
         trailing: isSelected
@@ -739,7 +788,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 color: theme.colorScheme.primary,
               )
             : widget.daemonService.currentRole == 'host'
-            ? _buildAdminMenu(ip, peer)
+            ? _buildAdminMenu(id, peer)
             : null,
         onTap:
             onTap ??
@@ -762,18 +811,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildAdminMenu(String ip, Map<String, dynamic> peer) {
+  Widget _buildAdminMenu(String id, Map<String, dynamic> peer) {
     return PopupMenuButton<String>(
       icon: const Icon(Icons.more_vert_rounded, color: Colors.grey, size: 20),
       onSelected: (value) async {
         if (value == 'kick') {
-          await widget.daemonService.disconnectPeer(ip);
+          await widget.daemonService.disconnectPeer(id);
         } else if (value == 'ban') {
           final confirm = await _showConfirmDialog(
             'Ban Device?',
             'This device will be blocked permanently.',
           );
-          if (confirm) await widget.daemonService.banPeer(ip);
+          if (confirm) await widget.daemonService.banPeer(id);
         }
       },
       itemBuilder: (context) => [
@@ -798,7 +847,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _showConnectToDiscoveredDialog(Map<String, dynamic> peer) async {
-    final ip = peer['ip'] ?? peer['dest_ip'] ?? 'Unknown';
+    final id = peer['id'] ?? peer['ip'] ?? 'Unknown';
     final name = peer['name'] ?? 'Nearby Device';
 
     final confirm =
@@ -807,7 +856,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           builder: (context) => AlertDialog(
             title: const Text('Connect to Device?'),
             content: Text(
-              'Do you want to connect to $name ($ip)?\nYou will need to enter the 6-digit PIN shown on their screen.',
+              'Do you want to connect to $name ($id)?\nYou will need to enter the 6-digit PIN shown on their screen.',
             ),
             actions: [
               TextButton(

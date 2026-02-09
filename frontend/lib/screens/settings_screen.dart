@@ -15,6 +15,22 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final ScrollController _scrollController = ScrollController();
+  final TextEditingController _deviceNameController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final name = await widget.daemonService.getSetting('device_name');
+    if (name.isNotEmpty && mounted) {
+      setState(() {
+        _deviceNameController.text = name;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -52,6 +68,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ]),
           const SizedBox(height: 32),
+          _buildSection(theme, 'Device', [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.laptop_chromebook),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: TextField(
+                      controller: _deviceNameController,
+                      decoration: const InputDecoration(
+                        labelText: 'Device Name',
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (value) {
+                        if (value.trim().isNotEmpty) {
+                          widget.daemonService.setDeviceName(value.trim());
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Device name set to $value'),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.save),
+                    onPressed: () {
+                      final value = _deviceNameController.text.trim();
+                      if (value.isNotEmpty) {
+                        widget.daemonService.setDeviceName(value);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Device name set to $value')),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ]),
+          const SizedBox(height: 32),
           _buildSection(theme, 'Network', [
             ListTile(
               leading: const Icon(Icons.info_outline),
@@ -73,8 +132,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ListTile(
               leading: const Icon(Icons.refresh_rounded),
               title: const Text('Restart Daemon'),
-              onTap: () {
-                // TODO: Implement restart
+              onTap: () async {
+                final scaffoldMessenger = ScaffoldMessenger.of(context);
+                scaffoldMessenger.showSnackBar(
+                  const SnackBar(content: Text('Restarting daemon...')),
+                );
+                await widget.daemonService.disconnect();
+                await Future.delayed(const Duration(seconds: 1));
+                await widget.daemonService.connect();
+                scaffoldMessenger.showSnackBar(
+                  const SnackBar(content: Text('Daemon restarted')),
+                );
+                setState(() {});
               },
             ),
           ]),

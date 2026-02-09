@@ -66,43 +66,40 @@ impl DiscoveryService {
                 
                 std::thread::spawn(move || {
                     while let Ok(event) = receiver.recv() {
-                        match event {
-                            mdns_sd::ServiceEvent::ServiceResolved(info) => {
-                                let properties = info.get_properties();
-                                if let Some(peer_id) = properties.get("id") {
-                                    let peer_id = peer_id.val_str();
-                                    let addresses = info.get_addresses();
-                                    if !addresses.is_empty() {
-                                        let bt_addr = properties.get("bt").and_then(|v| v.val_str().parse::<u64>().ok());
-                                        
-                                        let peer_info = PeerInfo {
-                                            peer_id: peer_id.to_string(),
-                                            name: info.get_fullname().to_string(),
-                                            ips: addresses.iter().cloned().collect(),
-                                            port: info.get_port(),
-                                            bt_addr,
-                                            shared_key: None,
-                                        };
-                                        peers.update_peer_discovery(peer_info.clone());
+                        if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
+                            let properties = info.get_properties();
+                            if let Some(peer_id) = properties.get("id") {
+                                let peer_id = peer_id.val_str();
+                                let addresses = info.get_addresses();
+                                if !addresses.is_empty() {
+                                    let bt_addr = properties.get("bt").and_then(|v| v.val_str().parse::<u64>().ok());
+                                    
+                                    let peer_info = PeerInfo {
+                                        peer_id: peer_id.to_string(),
+                                        name: info.get_fullname().to_string(),
+                                        ips: addresses.iter().cloned().collect(),
+                                        port: info.get_port(),
+                                        bt_addr,
+                                        shared_key: None,
+                                    };
+                                    peers.update_peer_discovery(peer_info.clone());
 
-                                        // Proactively connect to all LAN addresses
-                                        let addrs: Vec<std::net::SocketAddr> = peer_info.ips.iter()
-                                            .map(|ip| std::net::SocketAddr::new(*ip, peer_info.port))
-                                            .collect();
-                                        
-                                        orchestrator.connect_to_peer_multi(peer_info.peer_id.clone(), addrs);
+                                    // Proactively connect to all LAN addresses
+                                    let addrs: Vec<std::net::SocketAddr> = peer_info.ips.iter()
+                                        .map(|ip| std::net::SocketAddr::new(*ip, peer_info.port))
+                                        .collect();
+                                    
+                                    orchestrator.connect_to_peer_multi(peer_info.peer_id.clone(), addrs);
 
-                                        // Emit to UI (first IP for simple display)
-                                        crate::ffi::emit_event(crate::ffi::DaemonEvent::PeerDiscovered {
-                                            peer_id: peer_info.peer_id,
-                                            name: peer_info.name,
-                                            ip: peer_info.ips[0].to_string(),
-                                            port: peer_info.port,
-                                        });
-                                    }
+                                    // Emit to UI (first IP for simple display)
+                                    crate::ffi::emit_event(crate::ffi::DaemonEvent::PeerDiscovered {
+                                        peer_id: peer_info.peer_id,
+                                        name: peer_info.name,
+                                        ip: peer_info.ips[0].to_string(),
+                                        port: peer_info.port,
+                                    });
                                 }
                             }
-                            _ => {}
                         }
                     }
                 });
@@ -238,7 +235,7 @@ impl DiscoveryService {
                             }
 
                             // 2. Add Local Addrs (using same port as public addr for simplicity, or 5051 as default)
-                            let port = target_addrs.get(0).map(|a| a.port()).unwrap_or(5051);
+                            let port = target_addrs.first().map(|a| a.port()).unwrap_or(5051);
                             for local_ip in other.local_ips {
                                 if let Ok(ip) = local_ip.parse::<std::net::IpAddr>() {
                                     target_addrs.push(std::net::SocketAddr::new(ip, port));
@@ -261,10 +258,7 @@ impl DiscoveryService {
                                 let should_connect = {
                                     let peers = mesh.peers.read().unwrap();
                                     if let Some(peer) = peers.get(&other.peer_id) {
-                                        match peer.status {
-                                            PeerStatus::Online | PeerStatus::Paired => false,
-                                            _ => true,
-                                        }
+                                        !matches!(peer.status, PeerStatus::Online | PeerStatus::Paired)
                                     } else {
                                         true
                                     }
@@ -300,12 +294,99 @@ impl DiscoveryService {
     }
 
     pub fn join_ldt_session(&self, text: &str, orchestrator: Arc<crate::mesh::orchestrator::Orchestrator>) {
-        // If it looks like a PIN (6 digits), treat as PIN signaling
+        let text = text.trim();
+        
+        // 1. PIN Logic (6 digits)
         if text.len() == 6 && text.chars().all(|c| c.is_ascii_digit()) {
+            info!("🔒 Joining LDT session via PIN: {}", text);
             self.start_signaling(text, orchestrator);
+            return;
+        }
+
+        // 2. Direct Connection Logic (QR Payload: "ip:port|key" or "ip|key" or "ip")
+        info!("🔗 Analyzing Universal Join code: {}", text);
+        
+        let parts: Vec<&str> = text.split('|').collect();
+        let ip_part = parts[0];
+        let auth_key = if parts.len() > 1 { Some(parts[1].to_string()) } else { None };
+
+        // Parse IP and Port
+        // Parse IP and Port
+        // Format can be:
+        // 1. IP (default port 5051)
+        // 2. IP:PORT (IPv4)
+        // 3. [IP]:PORT (IPv6)
+        
+        let (ip_str, port) = if ip_part.starts_with('[') {
+            // IPv6 with brackets
+             if let Some(close_bracket) = ip_part.rfind(']') {
+                 let ip = &ip_part[1..close_bracket];
+                 let rest = &ip_part[close_bracket+1..];
+                 let port = if rest.starts_with(':') {
+                     rest[1..].parse::<u16>().unwrap_or(5051)
+                 } else {
+                     5051
+                 };
+                 (ip, port)
+             } else {
+                 (ip_part, 5051)
+             }
+        } else if let Some(colon_idx) = ip_part.rfind(':') {
+            // IPv4 with port OR IPv6 without brackets (technically ambiguous if not bracketed, but we try)
+            // If it has multiple colons, it's likely a raw IPv6 address without port, UNLESS the last part is a small number
+            let ip_candidate = &ip_part[..colon_idx];
+            let port_candidate = &ip_part[colon_idx+1..];
+            
+            if let Ok(p) = port_candidate.parse::<u16>() {
+                // It ends with a valid port number, so split it
+                // BUT, if the IP candidate is not a valid IP, and the WHOLE thing IS a valid IPv6, then it's just an IP
+                if ip_candidate.parse::<std::net::IpAddr>().is_ok() {
+                    (ip_candidate, p)
+                } else if ip_part.parse::<std::net::IpAddr>().is_ok() {
+                     (ip_part, 5051)
+                } else {
+                     // Fallback, maybe it is a hostname?
+                     (ip_candidate, p)
+                }
+            } else {
+                // Port candidate is not a number, so the whole thing is likely an IP (IPv6)
+                (ip_part, 5051)
+            }
         } else {
-            // Otherwise treat as a raw code (future expansion)
-            info!("📡 Joining raw LDT session: {}", text);
+            (ip_part, 5051)
+        };
+
+        if let Ok(ip) = ip_str.parse::<std::net::IpAddr>() {
+            info!("🚀 Direct Connection initiated to {}:{}", ip, port);
+            
+            let peer_id = format!("qr-{}", ip.to_string().replace(".", "-")); // Temp ID until handshake
+            let addr = std::net::SocketAddr::new(ip, port);
+
+            // Add to mesh with shared key if present
+            let peer_info = PeerInfo {
+                peer_id: peer_id.clone(),
+                name: "Direct Peer".to_string(),
+                ips: vec![ip],
+                port,
+                bt_addr: None,
+                shared_key: auth_key,
+            };
+            self.mesh.update_peer_discovery(peer_info);
+
+            // Trigger connection
+            orchestrator.connect_to_peer_multi(peer_id, vec![addr]);
+        } else {
+            warn!("❌ Invalid join code format: {}", text);
+        }
+    }
+
+    pub async fn stop(&self) {
+        if let Some(_mdns) = &self.mdns {
+            // This will drop the daemon and stop browsing threads
+            // mdns_sd handles shutdown gracefully on drop or explicit shutdown
+            info!("🛑 Stopping Discovery Service...");
+            // We don't necessarily want to kill the daemon if multiple services use it,
+            // but for this app it's fine.
         }
     }
 

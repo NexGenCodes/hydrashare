@@ -5,6 +5,13 @@ use std::slice;
 use sha2::{Sha256, Digest};
 use crate::common::*;
 
+/// Calculates SHA-256 hash of a file.
+///
+/// # Safety
+///
+/// - `file_path` must be a valid, null-terminated C string.
+/// - `hash_output` must point to a buffer of at least `hash_len` bytes.
+/// - `hash_len` must be at least 32.
 pub unsafe fn calculate_file_hash_internal(
     file_path: *const std::os::raw::c_char,
     hash_output: *mut u8,

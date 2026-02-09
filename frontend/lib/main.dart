@@ -7,6 +7,8 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import 'providers/theme_provider.dart';
 import 'services/daemon_service.dart';
 import 'screens/onboarding_screen.dart';
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
 import 'core/theme/app_theme.dart';
 
 void main() async {
@@ -25,6 +27,11 @@ void main() async {
   // Keep screen awake while app is active
   await WakelockPlus.enable();
 
+  // Check and request permissions on Android
+  if (Platform.isAndroid) {
+    await _requestAndroidPermissions();
+  }
+
   // Connect to daemon
   final daemonService = DaemonService();
   try {
@@ -39,8 +46,62 @@ void main() async {
   );
 }
 
-class MyApp extends StatelessWidget {
+Future<void> _requestAndroidPermissions() async {
+  // Request multiple permissions at once
+  Map<Permission, PermissionStatus> statuses = await [
+    Permission.location,
+    Permission.nearbyWifiDevices,
+    Permission.bluetooth,
+    Permission.bluetoothScan,
+    Permission.bluetoothConnect,
+    Permission.bluetoothAdvertise,
+    Permission.notification,
+  ].request();
+
+  debugPrint('🔒 Permission Statuses: $statuses');
+}
+
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    final daemon = DaemonService();
+
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        debugPrint('⏸️ App backgrounded: Stopping discovery to save battery');
+        daemon.stopDiscovery();
+        break;
+      case AppLifecycleState.resumed:
+        debugPrint('▶️ App resumed: Restarting discovery');
+        daemon.startDiscovery();
+        break;
+      case AppLifecycleState.inactive:
+        // Do nothing for inactive (e.g. notification shade)
+        break;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

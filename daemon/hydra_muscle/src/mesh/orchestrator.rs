@@ -40,6 +40,7 @@ pub enum MeshMessage {
     G2gTransferReq {
         target_peer_id: String,
         file_name: String,
+        file_size: u64,
         transfer_id: String,
         thumbnail: Option<String>,
     },
@@ -50,12 +51,16 @@ pub enum MeshMessage {
     G2gTransferCancel {
         transfer_id: String,
     },
+    G2gTransferReject {
+        transfer_id: String,
+    },
 }
 
 #[derive(Clone)]
 pub struct Orchestrator {
     mesh: Arc<MeshNetwork>,
     _discovery: Arc<DiscoveryService>,
+    db: Arc<crate::db::Database>,
     local_peer_id: String,
     last_heartbeats: Arc<RwLock<HashMap<String, SystemTime>>>,
     bound_port: Arc<AtomicU16>,
@@ -64,10 +69,11 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
-    pub fn new(local_peer_id: &str, mesh: Arc<MeshNetwork>, discovery: Arc<DiscoveryService>) -> Self {
+    pub fn new(local_peer_id: &str, mesh: Arc<MeshNetwork>, discovery: Arc<DiscoveryService>, db: Arc<crate::db::Database>) -> Self {
         Self {
             mesh,
             _discovery: discovery,
+            db,
             local_peer_id: local_peer_id.to_string(),
             last_heartbeats: Arc::new(RwLock::new(HashMap::new())),
             bound_port: Arc::new(AtomicU16::new(0)),
@@ -81,11 +87,45 @@ impl Orchestrator {
     }
 
     pub fn get_connection_count(&self, peer_id: &str) -> usize {
-        self.connections.read().unwrap().get(peer_id).map(|v| v.len()).unwrap_or(0)
+        self.connections.read().map(|conns| conns.get(peer_id).map(|v| v.len()).unwrap_or(0)).unwrap_or(0)
     }
 
     pub fn has_connection(&self, peer_id: &str) -> bool {
-        self.connections.read().unwrap().contains_key(peer_id)
+        self.connections.read().map(|conns| conns.contains_key(peer_id)).unwrap_or(false)
+    }
+
+    pub async fn restore_peers_from_db(&self) {
+        let db = self.db.clone();
+        info!("🔄 Restoring peers from database...");
+        
+        let peers = match db.get_all_peers() {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("⚠️ Failed to load peers from DB: {}", e);
+                return;
+            }
+        };
+        
+        info!("📦 Found {} saved peers", peers.len());
+        
+        for peer_info in peers {
+            // Skip peers with no IPs
+            if peer_info.ips.is_empty() {
+                continue;
+            }
+            
+            info!("🔌 Restoring peer: {} ({})", peer_info.name, peer_info.peer_id);
+            
+            // Add to mesh as Offline initially
+            self.mesh.update_peer_discovery(peer_info.clone());
+            
+            // Attempt reconnection
+            let addrs: Vec<std::net::SocketAddr> = peer_info.ips.iter()
+                .map(|ip| std::net::SocketAddr::new(*ip, peer_info.port))
+                .collect();
+            
+            self.connect_to_peer_multi(peer_info.peer_id.clone(), addrs);
+        }
     }
 
     pub async fn start(&self) -> Result<u16> {
@@ -117,7 +157,10 @@ impl Orchestrator {
                 let mut peers_to_remove = Vec::new();
                 
                 {
-                    let hbs = heartbeats.read().unwrap();
+                    let hbs = match heartbeats.read() {
+                        Ok(guard) => guard,
+                        Err(_) => break,
+                    };
                     for (id, last_seen) in hbs.iter() {
                         if now.duration_since(*last_seen).unwrap_or(Duration::from_secs(0)) > Duration::from_secs(30) {
                             peers_to_remove.push(id.clone());
@@ -127,21 +170,29 @@ impl Orchestrator {
 
                 for id in peers_to_remove {
                     info!("🔌 Peer {} timed out", id);
-                    heartbeats.write().unwrap().remove(&id);
-                    let mut peers = mesh.peers.write().unwrap();
-                    if let Some(peer) = peers.get_mut(&id) {
-                        peer.status = PeerStatus::Offline;
-                        emit_event(DaemonEvent::PeerLost { peer_id: id.clone() });
+                    if let Ok(mut guard) = heartbeats.write() {
+                        guard.remove(&id);
+                    }
+                    if let Ok(mut peers) = mesh.peers.write() {
+                        if let Some(peer) = peers.get_mut(&id) {
+                            peer.status = PeerStatus::Offline;
+                            emit_event(DaemonEvent::PeerLost { peer_id: id.clone() });
+                        }
                     }
                 }
 
                 // Smart Heartbeat: Broadcast our health to all active connections
-                let health = crate::system::INTELLIGENCE.read().unwrap().get_health();
+                let health = if let Ok(guard) = crate::system::INTELLIGENCE.read() {
+                    guard.get_health()
+                } else {
+                    crate::system::SystemHealth::Optimal
+                };
                 let msg = MeshMessage::Heartbeat { health: Some(health) };
                 
-                let peer_ids: Vec<String> = {
-                    let conns = orchestrator.connections.read().unwrap();
+                let peer_ids: Vec<String> = if let Ok(conns) = orchestrator.connections.read() {
                     conns.keys().cloned().collect()
+                } else {
+                    Vec::new()
                 };
                 
                 for id in peer_ids {
@@ -152,9 +203,18 @@ impl Orchestrator {
     }
 
     pub async fn bind_quic_server(&self) -> Result<(Endpoint, u16)> {
-        let addr = "0.0.0.0:0".parse().unwrap();
+        // Try to bind to standard port 5051 first, then 0 (random) if failed
+        let addr_fixed = "0.0.0.0:5051".parse().unwrap();
         let server_cfg = cert::make_hydra_server_config(None);
-        let endpoint = Endpoint::server(server_cfg, addr)?;
+        
+        let endpoint = match Endpoint::server(server_cfg.clone(), addr_fixed) {
+            Ok(ep) => ep,
+            Err(e) => {
+                warn!("⚠️ Failed to bind to 5051 ({}), falling back to random port", e);
+                let addr_random = "0.0.0.0:0".parse().unwrap();
+                Endpoint::server(server_cfg, addr_random)?
+            }
+        };
         let port = endpoint.local_addr()?.port();
         self.bound_port.store(port, Ordering::Relaxed);
         
@@ -199,14 +259,35 @@ impl Orchestrator {
 
                     while let Ok(Some(len)) = recv.read(&mut buf).await {
                         if let Ok(msg) = serde_json::from_slice::<MeshMessage>(&buf[..len]) {
-                            if let MeshMessage::Handshake { ref peer_id, .. } = msg {
+                            debug!("📩 Received handshake message type from stream");
+                            if let MeshMessage::Handshake { ref peer_id, ref name } = msg {
                                 remote_peer_id = Some(peer_id.clone());
                                 // Register connection in bonding pool
-                                let mut conns = orchestrator.connections.write().unwrap();
-                                let entry = conns.entry(peer_id.clone()).or_insert_with(Vec::new);
-                                if !entry.iter().any(|c| c.remote_address() == conn.remote_address()) {
-                                    entry.push(conn.clone());
-                                    info!("🔗 Bonded connection added for {}: {}", peer_id, conn.remote_address());
+                                if let Ok(mut conns) = orchestrator.connections.write() {
+                                    let entry = conns.entry(peer_id.clone()).or_insert_with(Vec::new);
+                                    if !entry.iter().any(|c| c.remote_address() == conn.remote_address()) {
+                                        entry.push(conn.clone());
+                                        info!("🔗 Bonded connection added for {}: {}", peer_id, conn.remote_address());
+                                        
+                                        // Emit PeerConnected event
+                                        crate::ffi::emit_event(crate::ffi::DaemonEvent::PeerConnected {
+                                            peer_id: peer_id.clone(),
+                                            name: name.clone(),
+                                            address: conn.remote_address().ip().to_string(),
+                                            port: conn.remote_address().port(),
+                                        });
+
+                                        // Auto-save peer to DB
+                                        let peer_info = crate::db::PeerInfo {
+                                            peer_id: peer_id.clone(),
+                                            name: name.clone(),
+                                            ips: vec![conn.remote_address().ip()],
+                                            port: conn.remote_address().port(),
+                                            bt_addr: None, 
+                                            shared_key: orchestrator.mesh.get_peer(peer_id).and_then(|p| p.shared_key),
+                                        };
+                                        let _ = orchestrator.db.save_peer(&peer_info);
+                                    }
                                 }
                             }
 
@@ -249,12 +330,12 @@ impl Orchestrator {
         let mut len_buf = [0u8; 4];
         loop {
             // Read length-prefix (4 bytes)
-            if let Err(_) = stream.read_exact(&mut len_buf) { break; }
+            if stream.read_exact(&mut len_buf).is_err() { break; }
             let len = u32::from_be_bytes(len_buf) as usize;
             if len > 65536 { break; } // Sanity check
 
             let mut msg_buf = vec![0u8; len];
-            if let Err(_) = stream.read_exact(&mut msg_buf) { break; }
+            if stream.read_exact(&mut msg_buf).is_err() { break; }
 
             if let Ok(msg) = serde_json::from_slice::<MeshMessage>(&msg_buf) {
                 self.handle_message("bluetooth", msg);
@@ -286,13 +367,21 @@ impl Orchestrator {
             info!("🛰️ Attempting parallel connection to peer at {:?}", scored_addrs);
             
             // Create the endpoint once
-            let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap()).expect("Failed to create client endpoint");
+            let mut endpoint = match Endpoint::client("0.0.0.0:0".parse().unwrap()) {
+                Ok(ep) => ep,
+                Err(e) => {
+                    error!("❌ Failed to create client endpoint: {}", e);
+                    return;
+                }
+            };
             endpoint.set_default_client_config(client_cfg);
             
-            let mut futures: Vec<BoxFuture<Result<(std::net::SocketAddr, quinn::Connection), (std::net::SocketAddr, String)>>> = Vec::new();
+            type ConnectionResult = Result<(std::net::SocketAddr, quinn::Connection), (std::net::SocketAddr, String)>;
+            let mut futures: Vec<BoxFuture<ConnectionResult>> = Vec::new();
             for (_, addr) in scored_addrs {
                 let conn_fut = endpoint.connect(addr, "localhost");
                 futures.push(async move {
+                    info!("⏳ Connecting to {}...", addr);
                     match conn_fut {
                         Ok(conn) => {
                             match conn.await {
@@ -308,12 +397,10 @@ impl Orchestrator {
             // Parallel Bonding: Keep all successful connections from distinct local interfaces
             let results = futures::future::join_all(futures).await;
             let mut succeeded = false;
-            for res in results {
-                if let Ok((addr, connection)) = res {
-                    info!("✅ Path established to {} for {}", addr, peer_id);
-                    orchestrator.start_mesh_session(connection).await;
-                    succeeded = true;
-                }
+            for (addr, connection) in results.into_iter().flatten() {
+                info!("✅ Path established to {} for {}", addr, peer_id);
+                orchestrator.start_mesh_session(connection).await;
+                succeeded = true;
             }
             
             if !succeeded {
@@ -327,8 +414,23 @@ impl Orchestrator {
         });
     }
 
+    pub async fn disconnect_peer(&self, peer_id: &str) {
+        info!("✂️ Disconnecting peer: {}", peer_id);
+        
+        if let Ok(mut conns) = self.connections.write() {
+            if let Some(peer_conns) = conns.remove(peer_id) {
+                for conn in peer_conns {
+                    conn.close(0u32.into(), b"Closed by user");
+                }
+            }
+        }
+        
+        self.mesh.update_peer_status(peer_id, PeerStatus::Offline);
+        emit_event(DaemonEvent::PeerDisconnected { peer_id: peer_id.to_string() });
+    }
+
     fn _send_bluetooth_message(stream: &mut BluetoothStream, msg: &MeshMessage) -> io::Result<()> {
-        let buf = serde_json::to_vec(msg).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let buf = serde_json::to_vec(msg).map_err(io::Error::other)?;
         let len = buf.len() as u32;
         stream.write_all(&len.to_be_bytes())?;
         stream.write_all(&buf)?;
@@ -359,7 +461,7 @@ impl Orchestrator {
         };
 
         let msg = MeshMessage::Handshake {
-            name: hostname::get().unwrap_or_default().to_string_lossy().to_string(),
+            name: hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|_| "Unknown".to_string()),
             peer_id: self.local_peer_id.clone(),
         };
 
@@ -378,12 +480,32 @@ impl Orchestrator {
                 let mut recv = pair.1;
                 while let Ok(Some(len)) = recv.read(&mut buf).await {
                     if let Ok(msg) = serde_json::from_slice::<MeshMessage>(&buf[..len]) {
-                        if let MeshMessage::Handshake { ref peer_id, .. } = msg {
+                        if let MeshMessage::Handshake { ref peer_id, ref name } = msg {
                             remote_id = Some(peer_id.clone());
-                            let mut conns = orchestrator.connections.write().unwrap();
-                            let entry = conns.entry(peer_id.clone()).or_insert_with(Vec::new);
-                            if !entry.iter().any(|c| c.remote_address() == conn.remote_address()) {
-                                entry.push(conn.clone());
+                            if let Ok(mut conns) = orchestrator.connections.write() {
+                                let entry = conns.entry(peer_id.clone()).or_insert_with(Vec::new);
+                                if !entry.iter().any(|c| c.remote_address() == conn.remote_address()) {
+                                    entry.push(conn.clone());
+                                    
+                                    // Emit PeerConnected event for outgoing connection
+                                    crate::ffi::emit_event(crate::ffi::DaemonEvent::PeerConnected {
+                                        peer_id: peer_id.clone(),
+                                        name: name.clone(),
+                                        address: conn.remote_address().ip().to_string(),
+                                        port: conn.remote_address().port(),
+                                    });
+
+                                    // Auto-save peer to DB
+                                    let peer_info = crate::db::PeerInfo {
+                                        peer_id: peer_id.clone(),
+                                        name: name.clone(),
+                                        ips: vec![conn.remote_address().ip()],
+                                        port: conn.remote_address().port(),
+                                        bt_addr: None, 
+                                        shared_key: orchestrator.mesh.get_peer(peer_id).and_then(|p| p.shared_key),
+                                    };
+                                    let _ = orchestrator.db.save_peer(&peer_info);
+                                }
                             }
                         }
                         let sender_id = remote_id.clone().unwrap_or_else(|| "unknown".to_string());
@@ -394,7 +516,7 @@ impl Orchestrator {
         });
     }
     pub fn select_best_connection(&self, peer_id: &str) -> Result<quinn::Connection> {
-        let conns = self.connections.read().unwrap();
+        let conns = self.connections.read().map_err(|_| anyhow::anyhow!("Connections lock poisoned"))?;
         let peer_conns = conns.get(peer_id).ok_or_else(|| anyhow::anyhow!("No active connection to {}", peer_id))?;
         
         // Smart Pathfinding: Score = (Base Network Type) - (Real-time RTT in ms)
@@ -424,7 +546,9 @@ impl Orchestrator {
         debug!("📩 Mesh message from {}: {:?}", peer_id, msg);
         
         // Update heartbeat
-        self.last_heartbeats.write().unwrap().insert(peer_id.to_string(), SystemTime::now());
+        if let Ok(mut hbs) = self.last_heartbeats.write() {
+            hbs.insert(peer_id.to_string(), SystemTime::now());
+        }
 
         match msg {
             MeshMessage::Heartbeat { health } => {
@@ -473,16 +597,17 @@ impl Orchestrator {
                     return;
                 }
                 
-                let (file_name, transfer_id, thumbnail) = match msg {
-                    MeshMessage::G2gTransferReq { file_name, transfer_id, thumbnail, .. } => (file_name, transfer_id, thumbnail),
+                let (file_name, file_size, transfer_id, thumbnail) = match msg {
+                    MeshMessage::G2gTransferReq { file_name, file_size, transfer_id, thumbnail, .. } => (file_name, file_size, transfer_id, thumbnail),
                     _ => unreachable!(),
                 };
                 
-                info!("📂 File offer: {} (ID: {})", file_name, transfer_id);
+                info!("📂 File offer: {} ({} bytes, ID: {})", file_name, file_size, transfer_id);
                 emit_event(DaemonEvent::TransferOffer {
                     peer_id: peer_id.to_string(),
                     transfer_id,
                     file_name,
+                    file_size,
                     thumbnail,
                 });
             }
@@ -496,9 +621,10 @@ impl Orchestrator {
             }
             MeshMessage::G2gTransferAccept { transfer_id, delta_map } => {
                 info!("✅ Transfer accepted: {}", transfer_id);
-                let file_path = {
-                    let pending = self.pending_transfers.read().unwrap();
+                let file_path = if let Ok(pending) = self.pending_transfers.read() {
                     pending.get(&transfer_id).cloned()
+                } else {
+                    None
                 };
 
                 if let Some(path) = file_path {
@@ -540,6 +666,13 @@ impl Orchestrator {
                         }
                     });
                 }
+            }
+            MeshMessage::G2gTransferReject { transfer_id } => {
+                info!("❌ Peer rejected transfer {}", transfer_id);
+                emit_event(DaemonEvent::TransferComplete {
+                    transfer_id,
+                    status: "REJECTED_BY_PEER".to_string(),
+                });
             }
             _ => {
                 warn!("Unhandled mesh message: {:?}", msg);

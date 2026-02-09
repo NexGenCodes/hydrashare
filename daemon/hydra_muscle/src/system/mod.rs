@@ -7,28 +7,21 @@ use tracing::debug;
 
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub enum SystemHealth {
+    #[default]
     Optimal,
     Throttled,   // Battery < 20% or High Temp
     Emergency,   // Battery < 5% or Critical Temp
 }
 
+#[derive(Default)]
 pub struct Intelligence {
     sys: System,
     health: SystemHealth,
 }
 
 impl Intelligence {
-    pub fn new() -> Self {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-        Self {
-            sys,
-            health: SystemHealth::Optimal,
-        }
-    }
-
     pub fn refresh(&mut self) {
         self.sys.refresh_all();
         
@@ -50,7 +43,7 @@ impl Intelligence {
 }
 
 pub static INTELLIGENCE: Lazy<Arc<RwLock<Intelligence>>> = Lazy::new(|| {
-    Arc::new(RwLock::new(Intelligence::new()))
+    Arc::new(RwLock::new(Intelligence::default()))
 });
 
 pub fn start_intelligence_loop() {
@@ -67,3 +60,17 @@ pub fn start_intelligence_loop() {
         }
     });
 }
+
+pub fn start_maintenance_loop(db: Arc<crate::db::Database>) {
+    self::runtime::RUNTIME.spawn(async move {
+        loop {
+            // Run cleanup every 1 hour (3600 seconds)
+            // For testing, we might want to run it more frequently initially
+            // but 1h is good for production.
+            let _ = db.cleanup_history();
+            
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        }
+    });
+}
+

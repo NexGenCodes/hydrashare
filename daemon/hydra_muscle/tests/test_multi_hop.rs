@@ -16,17 +16,22 @@ async fn create_node(id: &str) -> (Arc<Orchestrator>, u16) {
     let auth = Arc::new(AuthService::new(db.clone()));
     let mesh = Arc::new(MeshNetwork::new());
     let discovery = Arc::new(DiscoveryService::new(id, mesh.clone(), auth.clone()));
-    let orchestrator = Arc::new(Orchestrator::new(id, mesh.clone(), discovery));
+    let orchestrator = Arc::new(Orchestrator::new(id, mesh.clone(), discovery, db.clone()));
     let port = orchestrator.start().await.expect("Failed to start orchestrator");
     (orchestrator, port)
 }
 
 #[tokio::test]
 async fn test_multi_hop_forwarding() {
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_test_writer()
+        .try_init();
+
     // 1. Setup 3 nodes
     let (node_a, port_a) = create_node("node_a").await;
     let (node_b, port_b) = create_node("node_b").await;
-    let (node_c, port_c) = create_node("node_c").await;
+    let (_node_c, port_c) = create_node("node_c").await;
 
     println!("🏗️ Mesh Topology: Node A ({}) -> Node B ({}) -> Node C ({})", port_a, port_b, port_c);
 

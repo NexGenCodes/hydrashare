@@ -1,3 +1,4 @@
+mod frb_generated; /* AUTO INJECTED BY flutter_rust_bridge. This line may not be accurate, and you can change it according to your needs. */
 pub mod common;
 pub mod system;
 pub mod hash;
@@ -11,6 +12,7 @@ pub mod mesh;
 pub mod transfer;
 pub mod transport;
 pub mod ffi;
+pub mod api;
 
 use std::ffi::{c_void, CStr};
 use std::os::raw::c_char;
@@ -19,8 +21,11 @@ use std::slice;
 pub use common::*;
 pub use quic::{ProgressCallback, ConsentCallback, MessageCallback};
 
-/// FFI function for sending JSON commands from Flutter
-/// This provides compatibility while we migrate to binary rkyv format
+/// FFI function for sending JSON commands from Flutter.
+///
+/// # Safety
+///
+/// - `json_ptr` must be a valid, null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn send_command_json(json_ptr: *const c_char) -> i32 {
     if json_ptr.is_null() {
@@ -54,7 +59,13 @@ pub unsafe extern "C" fn send_command_json(json_ptr: *const c_char) -> i32 {
     }
 }
 
-/// FFI-safe transfer function
+/// FFI-safe transfer function.
+///
+/// # Safety
+///
+/// - `key_ptr` must point to a 32-byte buffer.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
 #[no_mangle]
 pub unsafe extern "C" fn transfer_data(
     source_fd: isize,
@@ -75,7 +86,13 @@ pub unsafe extern "C" fn transfer_data(
     match result { Ok(_) => SUCCESS, Err(code) => code }
 }
 
-/// FFI-safe receive function
+/// FFI-safe receive function.
+///
+/// # Safety
+///
+/// - `key_ptr` must point to a 32-byte buffer.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
 #[no_mangle]
 pub unsafe extern "C" fn receive_data(
     source_fd: isize,
@@ -95,7 +112,14 @@ pub unsafe extern "C" fn receive_data(
     match result { Ok(_) => SUCCESS, Err(code) => code }
 }
 
-/// FFI-safe QUIC transfer function
+/// FFI-safe QUIC transfer function.
+///
+/// # Safety
+///
+/// - `target_addr_ptr` and `file_path_ptr` must be valid, null-terminated C strings.
+/// - `key_ptr` must point to a 32-byte buffer.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
 #[no_mangle]
 pub unsafe extern "C" fn transfer_data_quic(
     target_addr_ptr: *const std::os::raw::c_char,
@@ -123,10 +147,17 @@ pub unsafe extern "C" fn transfer_data_quic(
             }
         })
     });
-    match result { Ok(res) => res, Err(_) => -5 }
+    result.unwrap_or(-5)
 }
 
-/// FFI-safe QUIC transfer function using existing FD
+/// FFI-safe QUIC transfer function using existing FD.
+///
+/// # Safety
+///
+/// - `remote_addr_ptr`, `header_json_ptr`, `file_path_ptr`, and `peer_id_ptr` must be valid, null-terminated C strings.
+/// - `key_ptr` must point to a 32-byte buffer.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
 #[no_mangle]
 pub unsafe extern "C" fn transfer_data_quic_fd(
     udp_fd: isize,
@@ -160,10 +191,17 @@ pub unsafe extern "C" fn transfer_data_quic_fd(
             }
         })
     });
-    match result { Ok(res) => res, Err(_) => -5 }
+    result.unwrap_or(-5)
 }
 
-/// FFI-safe QUIC receive function
+/// FFI-safe QUIC receive function.
+///
+/// # Safety
+///
+/// - `listen_addr_ptr` and `dest_path_ptr` must be valid, null-terminated C strings.
+/// - `key_ptr` must point to a 32-byte buffer.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
 #[no_mangle]
 pub unsafe extern "C" fn receive_data_quic(
     listen_addr_ptr: *const std::os::raw::c_char,
@@ -190,10 +228,18 @@ pub unsafe extern "C" fn receive_data_quic(
             }
         })
     });
-    match result { Ok(res) => res, Err(_) => -5 }
+    result.unwrap_or(-5)
 }
 
-/// FFI-safe QUIC receive function using existing FD
+/// FFI-safe QUIC receive function using existing FD.
+///
+/// # Safety
+///
+/// - `dest_path_ptr` must be a valid, null-terminated C string.
+/// - `key_ptr` must point to a 32-byte buffer.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
+/// - `priv_key_ptr` must point to a valid buffer of `priv_key_len` bytes if not null.
 #[no_mangle]
 pub unsafe extern "C" fn receive_data_quic_fd(
     udp_fd: isize,
@@ -223,10 +269,15 @@ pub unsafe extern "C" fn receive_data_quic_fd(
             }
         })
     });
-    match result { Ok(res) => res, Err(_) => -5 }
+    result.unwrap_or(-5)
 }
 
-/// Calculate SHA-256 hash of a file
+/// Calculate SHA-256 hash of a file.
+///
+/// # Safety
+///
+/// - `file_path` must be a valid, null-terminated C string.
+/// - `hash_output` must point to a 32-byte buffer.
 #[no_mangle]
 pub unsafe extern "C" fn calculate_file_hash(
     file_path: *const std::os::raw::c_char,
@@ -236,12 +287,15 @@ pub unsafe extern "C" fn calculate_file_hash(
     let result = std::panic::catch_unwind(|| {
         hash::calculate_file_hash_internal(file_path, hash_output, 32)
     });
-    match result {
-        Ok(res) => res,
-        Err(_) => -5,
-    }
+    result.unwrap_or(-5)
 }
 
+/// Opens a QUIC session.
+///
+/// # Safety
+///
+/// - `remote_addr_ptr` and `peer_id_ptr` must be valid, null-terminated C strings.
+/// - `ticket_ptr` must point to a valid buffer of `ticket_len` bytes if not null.
 #[no_mangle]
 pub unsafe extern "C" fn open_quic_session_v2(
     udp_fd: isize,
@@ -262,9 +316,15 @@ pub unsafe extern "C" fn open_quic_session_v2(
     let result = std::panic::catch_unwind(|| {
         crate::system::runtime::RUNTIME.block_on(async { match quic::open_session_fd_v2(udp_fd, remote_addr, ticket, expected_peer_id).await { Ok((id, _)) => id as i32, Err(e) => e } })
     });
-    match result { Ok(res) => res, Err(_) => -5 }
+    result.unwrap_or(-5)
 }
 
+/// Accepts a QUIC session.
+///
+/// # Safety
+///
+/// - `remote_addr_ptr` must point to a buffer of at least `addr_len` bytes if not null.
+/// - `priv_key_ptr` must point to a valid buffer of `priv_key_len` bytes if not null.
 #[no_mangle]
 pub unsafe extern "C" fn accept_quic_session_v2(
     udp_fd: isize,
@@ -289,14 +349,24 @@ pub unsafe extern "C" fn accept_quic_session_v2(
             }
         })
     });
-    match result { Ok(res) => res, Err(_) => -5 }
+    result.unwrap_or(-5)
 }
 
+/// Registers a callback for QUIC messages.
+///
+/// # Safety
+///
+/// - `callback` must be a valid function pointer if not null.
 #[no_mangle]
 pub unsafe extern "C" fn register_quic_message_callback(session_id: i32, callback: MessageCallback, user_data: *mut c_void) {
     quic::register_session_callback(session_id as u32, callback, user_data);
 }
 
+/// Sends a message over a QUIC session.
+///
+/// # Safety
+///
+/// - `message_ptr` must be a valid, null-terminated C string.
 #[no_mangle]
 pub unsafe extern "C" fn send_quic_message(session_id: i32, message_ptr: *const std::os::raw::c_char) -> i32 {
     use std::ffi::CStr;
@@ -306,9 +376,17 @@ pub unsafe extern "C" fn send_quic_message(session_id: i32, message_ptr: *const 
     let result = std::panic::catch_unwind(|| {
         crate::system::runtime::RUNTIME.block_on(async { match quic::session_send_message(session_id as u32, message).await { Ok(_) => SUCCESS, Err(e) => e } })
     });
-    match result { Ok(res) => res, Err(_) => -5 }
+    result.unwrap_or(-5)
 }
 
+/// FFI-safe QUIC transfer function using an existing session.
+///
+/// # Safety
+///
+/// - `header_json_ptr` and `file_path_ptr` must be valid, null-terminated C strings.
+/// - `key_ptr` must point to a 32-byte buffer.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
 #[no_mangle]
 pub unsafe extern "C" fn transfer_data_quic_session(
     session_id: i32,
@@ -337,9 +415,17 @@ pub unsafe extern "C" fn transfer_data_quic_session(
             }
         })
     });
-    match result { Ok(res) => res, Err(_) => -5 }
+    result.unwrap_or(-5)
 }
 
+/// FFI-safe QUIC receive function using an existing session.
+///
+/// # Safety
+///
+/// - `dest_path_ptr` must be a valid, null-terminated C string.
+/// - `key_ptr` must point to a 32-byte buffer.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
 #[no_mangle]
 pub unsafe extern "C" fn receive_data_quic_session(
     session_id: i32,
@@ -366,9 +452,14 @@ pub unsafe extern "C" fn receive_data_quic_session(
             }
         })
     });
-    match result { Ok(res) => res, Err(_) => -5 }
+    result.unwrap_or(-5)
 }
 
+/// Closes a QUIC session.
+///
+/// # Safety
+///
+/// This function is safe but marked unsafe for FFI consistency or if internal state requires it.
 #[no_mangle]
 pub unsafe extern "C" fn close_quic_session(session_id: i32) {
     quic::close_session(session_id as u32);

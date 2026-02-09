@@ -39,7 +39,7 @@ class _NetworkSelectionScreenState extends State<NetworkSelectionScreen> {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withOpacity(0.1),
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -61,7 +61,7 @@ class _NetworkSelectionScreenState extends State<NetworkSelectionScreen> {
           Text(
             'Share files directly with nearby devices.\nSecure, serverless, and lightning fast.',
             style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withOpacity(0.6),
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
             ),
             textAlign: TextAlign.center,
           ),

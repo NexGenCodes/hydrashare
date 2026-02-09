@@ -1,10 +1,9 @@
-use hydra_muscle::quic::{client, server, cert};
-use std::net::{SocketAddr, UdpSocket};
+use hydra_muscle::quic::{client, server};
+use std::net::UdpSocket;
 use tokio::time::Instant;
-use std::sync::Arc;
 use std::fs;
 use std::io::Write;
-use tracing::{info, Level};
+use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]

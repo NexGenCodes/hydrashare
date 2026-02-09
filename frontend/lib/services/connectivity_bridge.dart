@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 
 /// Platform channel for WiFi-Direct connectivity (Android only)
 class WiFiDirectBridge {
@@ -12,7 +13,7 @@ class WiFiDirectBridge {
       });
       return result == true;
     } on PlatformException catch (e) {
-      print('WiFi-Direct connection failed: ${e.message}');
+      debugPrint('WiFi-Direct connection failed: ${e.message}');
       return false;
     }
   }
@@ -22,15 +23,16 @@ class WiFiDirectBridge {
     try {
       await platform.invokeMethod('startWiFiDirectDiscovery');
     } on PlatformException catch (_) {
-      print('WiFi-Direct discovery failed');
+      debugPrint('WiFi-Direct discovery failed');
     }
   }
 
   /// Get currently discovered WiFi-Direct peers
   static Future<List<Map<String, dynamic>>> getPeers() async {
     try {
-      final result = await platform.invokeMethod('getWiFiDirectPeers');
-      return List<Map<String, dynamic>>.from(result ?? []);
+      final List? result = await platform.invokeMethod('getWiFiDirectPeers');
+      return result?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ??
+          [];
     } on PlatformException {
       return [];
     }
@@ -59,7 +61,7 @@ class BluetoothBridge {
       });
       return result == true;
     } on PlatformException catch (e) {
-      print('Bluetooth connection failed: ${e.message}');
+      debugPrint('Bluetooth connection failed: ${e.message}');
       return false;
     }
   }
@@ -69,15 +71,16 @@ class BluetoothBridge {
     try {
       await platform.invokeMethod('startBluetoothDiscovery');
     } on PlatformException catch (e) {
-      print('Bluetooth discovery failed: ${e.message}');
+      debugPrint('Bluetooth discovery failed: ${e.message}');
     }
   }
 
   /// Get currently discovered Bluetooth peers
   static Future<List<Map<String, dynamic>>> getPeers() async {
     try {
-      final result = await platform.invokeMethod('getBluetoothPeers');
-      return List<Map<String, dynamic>>.from(result ?? []);
+      final List? result = await platform.invokeMethod('getBluetoothPeers');
+      return result?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ??
+          [];
     } on PlatformException {
       return [];
     }

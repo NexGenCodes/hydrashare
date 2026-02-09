@@ -103,15 +103,15 @@ class AppTheme {
 
   static ScrollbarThemeData _scrollbarTheme(Brightness brightness) {
     return ScrollbarThemeData(
-      thumbVisibility: MaterialStateProperty.all(false),
-      thickness: MaterialStateProperty.all(6.0),
+      thumbVisibility: WidgetStateProperty.all(false),
+      thickness: WidgetStateProperty.all(6.0),
       radius: const Radius.circular(3.0),
-      thumbColor: MaterialStateProperty.resolveWith((states) {
-        if (states.contains(MaterialState.hovered) ||
-            states.contains(MaterialState.dragged)) {
-          return primaryPurple.withOpacity(0.5);
+      thumbColor: WidgetStateProperty.resolveWith((states) {
+        if (states.contains(WidgetState.hovered) ||
+            states.contains(WidgetState.dragged)) {
+          return primaryPurple.withValues(alpha: 0.5);
         }
-        return primaryPurple.withOpacity(0.2);
+        return primaryPurple.withValues(alpha: 0.2);
       }),
     );
   }

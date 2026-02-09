@@ -1,0 +1,64 @@
+name: Build HydraShare
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build All Platforms
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-pc-windows-msvc
+
+      - name: Install Codegen
+        run: cargo install flutter_rust_bridge_codegen --version 2.11.1
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r28
+
+      - name: Run Codegen
+        working-directory: .
+        run: flutter_rust_bridge_codegen generate
+
+      - name: Build Windows
+        working-directory: frontend
+        run: flutter build windows --debug
+
+      - name: Build Android
+        working-directory: frontend
+        run: flutter build apk --debug
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: frontend/build/windows/x64/runner/Debug/
+
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: frontend/build/app/outputs/flutter-apk/app-debug.apk

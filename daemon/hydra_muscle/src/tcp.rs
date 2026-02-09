@@ -20,6 +20,13 @@ use std::os::windows::io::{FromRawHandle, FromRawSocket};
 
 use crate::common::*;
 
+/// Transfers data from a source file descriptor to a destination socket with AES-256-GCM encryption.
+///
+/// # Safety
+///
+/// - `source_fd` and `dest_fd` must be valid file descriptors/handles/sockets for the platform.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
 pub unsafe fn transfer_data_encrypted(
     source_fd: isize,
     dest_fd: isize,
@@ -128,6 +135,13 @@ pub unsafe fn transfer_data_encrypted(
     Ok(())
 }
 
+/// Receives encrypted data from a source socket and writes decrypted data to a destination file descriptor.
+///
+/// # Safety
+///
+/// - `source_fd` and `dest_fd` must be valid file descriptors/handles/sockets for the platform.
+/// - `hash_output` must point to a 32-byte buffer if not null.
+/// - `cancel_flag` must point to a valid atomic i32 if not null.
 pub unsafe fn receive_data_encrypted(
     source_fd: isize,
     dest_fd: isize,
@@ -179,7 +193,7 @@ pub unsafe fn receive_data_encrypted(
 
         // Read Chunk Length
         let mut len_bytes = [0u8; 4];
-        if let Err(_) = source_stream.read_exact(&mut len_bytes) {
+        if source_stream.read_exact(&mut len_bytes).is_err() {
             break; // Likely EOF
         }
         let chunk_len = u32::from_be_bytes(len_bytes) as usize;

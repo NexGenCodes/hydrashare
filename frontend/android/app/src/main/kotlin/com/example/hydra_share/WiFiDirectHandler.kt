@@ -13,6 +13,12 @@ import io.flutter.plugin.common.MethodChannel
 class WiFiDirectHandler(private val context: Context) : MethodChannel.MethodCallHandler {
     private var wifiP2pManager: WifiP2pManager? = null
     private var channel: WifiP2pManager.Channel? = null
+    private val peers = mutableListOf<WifiP2pDevice>()
+
+    init {
+        wifiP2pManager = context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
+        channel = wifiP2pManager?.initialize(context, Looper.getMainLooper(), null)
+    }
     private val receiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action
@@ -99,5 +105,15 @@ class WiFiDirectHandler(private val context: Context) : MethodChannel.MethodCall
                 result.error("CONNECTION_FAILED", "Code: $reasonCode", null)
             }
         })
+    }
+    fun cleanup() {
+        if (isReceiverRegistered) {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (e: Exception) {
+                // Ignore
+            }
+            isReceiverRegistered = false
+        }
     }
 }

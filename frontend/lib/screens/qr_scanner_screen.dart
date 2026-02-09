@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/daemon_service.dart';
 import 'manual_pairing_screen.dart';
@@ -38,6 +37,8 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         throw Exception('Invalid QR code');
       }
 
+      debugPrint('📸 Scanned QR Code: $code'); // Added logging
+
       await controller.stop();
 
       if (!_daemonService.isConnected) {
@@ -45,7 +46,9 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       }
 
       _responseSubscription = _daemonService.responses.listen((response) {
+        debugPrint('📩 Daemon Response during QR: $response'); // Added logging
         if (response['type'] == 'PEER_CONNECTED' && mounted) {
+          debugPrint('✅ Peer Connected! Navigating to Home...');
           Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(
@@ -58,9 +61,11 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
       await _daemonService.connectToPeer(code);
     } catch (e) {
+      debugPrint('❌ Error handling QR code: $e'); // Added logging
       if (mounted) {
         setState(() => _isConnecting = false);
         await controller.start();
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Connection failed: $e'),
@@ -98,7 +103,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                       isWindows
                           ? Icons.computer_rounded
                           : Icons.error_outline_rounded,
-                      color: theme.colorScheme.primary.withOpacity(0.5),
+                      color: theme.colorScheme.primary.withValues(alpha: 0.5),
                       size: 64,
                     ),
                     const SizedBox(height: 24),
@@ -119,7 +124,9 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                             : 'Could not access the camera. Please check your permissions.',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurface.withOpacity(0.6),
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.6,
+                          ),
                         ),
                       ),
                     ),
@@ -131,7 +138,9 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
 
           // Scanning frame overlay
           Container(
-            decoration: BoxDecoration(color: Colors.black.withOpacity(0.5)),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.5),
+            ),
             child: Center(
               child: Container(
                 width: 280,
@@ -161,11 +170,11 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                     vertical: 16,
                   ),
                   decoration: BoxDecoration(
-                    color: theme.cardColor.withOpacity(0.95),
+                    color: theme.cardColor.withValues(alpha: 0.95),
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 10,
                       ),
                     ],
@@ -185,7 +194,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           // Loading overlay
           if (_isConnecting)
             Container(
-              color: Colors.black.withOpacity(0.8),
+              color: Colors.black.withValues(alpha: 0.8),
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,

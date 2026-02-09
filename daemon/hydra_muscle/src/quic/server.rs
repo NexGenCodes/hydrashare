@@ -104,7 +104,7 @@ pub async fn run_quic_receive(
                 let d_buf;
                 if is_comp { d_buf = zstd::decode_all(pt).map_err(|_| ERROR_TRANSFER_FAILED)?; pt = &d_buf; }
                 { let mut f = file.lock().await; f.seek(SeekFrom::Start((chunk_idx as u64) * (BLOCK_SIZE as u64))).await.map_err(|_| ERROR_TRANSFER_FAILED)?; f.write_all(pt).await.map_err(|_| ERROR_TRANSFER_FAILED)?; }
-                { let mut h = hasher.lock().unwrap(); h.update(pt); }
+                if let Ok(mut h) = hasher.lock() { h.update(pt); } 
                 let newly_rec = total_received.fetch_add(pt.len() as u64, Ordering::SeqCst) + pt.len() as u64;
                 if progress_callback != 0 {
                     let cb: ProgressCallback = unsafe { std::mem::transmute(progress_callback) };
@@ -118,9 +118,10 @@ pub async fn run_quic_receive(
     }
     for t in stream_tasks { let _ = t.await; }
     if hash_output != 0 {
-        let h = shared_hasher.lock().unwrap();
-        let result = h.clone().finalize();
-        unsafe { slice::from_raw_parts_mut(hash_output as *mut u8, 32).copy_from_slice(&result); }
+        if let Ok(h) = shared_hasher.lock() {
+            let result = h.clone().finalize();
+            unsafe { slice::from_raw_parts_mut(hash_output as *mut u8, 32).copy_from_slice(&result); }
+        }
     }
     drop(file); tokio::fs::rename(part_path, dest_path).await.map_err(|_| ERROR_TRANSFER_FAILED)?; Ok(())
 }
@@ -214,7 +215,7 @@ pub async fn run_quic_receive_fd(
                 let d_buf;
                 if is_comp { d_buf = zstd::decode_all(pt).map_err(|_| ERROR_TRANSFER_FAILED)?; pt = &d_buf; }
                 { let mut f = file.lock().await; f.seek(SeekFrom::Start((chunk_idx as u64) * (BLOCK_SIZE as u64))).await.map_err(|_| ERROR_TRANSFER_FAILED)?; f.write_all(pt).await.map_err(|_| ERROR_TRANSFER_FAILED)?; }
-                { let mut h = hasher.lock().unwrap(); h.update(pt); }
+                if let Ok(mut h) = hasher.lock() { h.update(pt); } 
                 let newly_rec = total_received.fetch_add(pt.len() as u64, Ordering::SeqCst) + pt.len() as u64;
                 if progress_callback != 0 {
                     let cb: ProgressCallback = unsafe { std::mem::transmute(progress_callback) };
@@ -228,9 +229,10 @@ pub async fn run_quic_receive_fd(
     }
     for t in stream_tasks { let _ = t.await; }
     if hash_output != 0 {
-        let h = shared_hasher.lock().unwrap();
-        let result = h.clone().finalize();
-        unsafe { slice::from_raw_parts_mut(hash_output as *mut u8, 32).copy_from_slice(&result); }
+        if let Ok(h) = shared_hasher.lock() {
+            let result = h.clone().finalize();
+            unsafe { slice::from_raw_parts_mut(hash_output as *mut u8, 32).copy_from_slice(&result); }
+        }
     }
     drop(file); tokio::fs::rename(part_path, dest_path).await.map_err(|_| ERROR_TRANSFER_FAILED)?; Ok(())
 }
@@ -247,10 +249,12 @@ pub async fn accept_session_fd(udp_fd: isize, local_priv_key: Option<&[u8]>) -> 
     let (tx, rx) = mpsc::unbounded_channel();
     crate::system::runtime::RUNTIME.spawn(session::session_dispatcher(conn.clone(), tx, id));
     let addr = conn.remote_address();
-    session::SESSIONS.write().unwrap().insert(id, session::Session { 
-        connections: vec![conn], 
-        data_rx: Arc::new(tokio::sync::Mutex::new(rx)) 
-    });
+    if let Ok(mut sessions) = session::SESSIONS.write() {
+        sessions.insert(id, session::Session { 
+            connections: vec![conn], 
+            data_rx: Arc::new(tokio::sync::Mutex::new(rx)) 
+        });
+    }
     Ok((id, addr))
 }
 
@@ -272,7 +276,10 @@ pub async fn run_quic_receive_session(
     _local_priv_key: Option<&[u8]>,
     _expected_peer_id: Option<String>,
 ) -> Result<(), i32> {
-    let rx_queue = { session::SESSIONS.read().unwrap().get(&session_id).ok_or(ERROR_INVALID_FD)?.data_rx.clone() };
+    let rx_queue = { 
+        let sessions = session::SESSIONS.read().map_err(|_| ERROR_INVALID_FD)?;
+        sessions.get(&session_id).ok_or(ERROR_INVALID_FD)?.data_rx.clone() 
+    };
     let mut locked_rx = rx_queue.lock().await;
     let (_, mut recv_ctrl) = locked_rx.recv().await.ok_or(ERROR_TRANSFER_FAILED)?;
     drop(locked_rx);
@@ -339,7 +346,7 @@ pub async fn run_quic_receive_session(
                 let d_buf;
                 if is_comp { d_buf = zstd::decode_all(pt).map_err(|_| ERROR_TRANSFER_FAILED)?; pt = &d_buf; }
                 { let mut f = file.lock().await; f.seek(SeekFrom::Start((chunk_idx as u64) * (BLOCK_SIZE as u64))).await.map_err(|_| ERROR_TRANSFER_FAILED)?; f.write_all(pt).await.map_err(|_| ERROR_TRANSFER_FAILED)?; }
-                { let mut h = hasher.lock().unwrap(); h.update(pt); }
+                if let Ok(mut h) = hasher.lock() { h.update(pt); } 
                 let newly_rec = total_received.fetch_add(pt.len() as u64, Ordering::SeqCst) + pt.len() as u64;
                 if progress_callback != 0 {
                     let cb: ProgressCallback = unsafe { std::mem::transmute(progress_callback) };
@@ -353,9 +360,10 @@ pub async fn run_quic_receive_session(
     }
     for t in stream_tasks { let _ = t.await; }
     if hash_output != 0 {
-        let h = shared_hasher.lock().unwrap();
-        let result = h.clone().finalize();
-        unsafe { slice::from_raw_parts_mut(hash_output as *mut u8, 32).copy_from_slice(&result); }
+        if let Ok(h) = shared_hasher.lock() {
+            let result = h.clone().finalize();
+            unsafe { slice::from_raw_parts_mut(hash_output as *mut u8, 32).copy_from_slice(&result); }
+        }
     }
     drop(file); tokio::fs::rename(part_path, dest_path).await.map_err(|_| ERROR_TRANSFER_FAILED)?; Ok(())
 }

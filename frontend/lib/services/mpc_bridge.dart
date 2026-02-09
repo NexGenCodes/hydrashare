@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 
 /// Bridge for iOS Multipeer Connectivity
 class MpcBridge {
@@ -28,7 +29,7 @@ class MpcBridge {
     try {
       await platform.invokeMethod('startMPC');
     } on PlatformException catch (e) {
-      print('MPC Start failed: ${e.message}');
+      debugPrint('MPC Start failed: ${e.message}');
     }
   }
 
@@ -46,7 +47,7 @@ class MpcBridge {
     try {
       await platform.invokeMethod('sendData', {'peerId': peerId, 'data': data});
     } on PlatformException catch (e) {
-      print('MPC Send failed: ${e.message}');
+      debugPrint('MPC Send failed: ${e.message}');
     }
   }
 }

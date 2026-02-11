@@ -249,6 +249,23 @@ impl Orchestrator {
             crate::system::runtime::RUNTIME.spawn(async move {
                 if let Ok(conn) = incoming.await {
                     info!("🤝 New mesh connection from {}", conn.remote_address());
+
+                    // Send our handshake on a new stream
+                    let orchestrator_clone = orchestrator.clone();
+                    let conn_clone = conn.clone();
+                    crate::system::runtime::RUNTIME.spawn(async move {
+                        if let Ok((mut send, _)) = conn_clone.open_bi().await {
+                            let handshake = MeshMessage::Handshake {
+                                name: hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|_| "Unknown".to_string()),
+                                peer_id: orchestrator_clone.local_peer_id.clone(),
+                            };
+                            if let Ok(buf) = serde_json::to_vec(&handshake) {
+                                let _ = send.write_all(&buf).await;
+                                let _ = send.finish();
+                            }
+                        }
+                    });
+
                     let (mut _send, mut recv) = match conn.accept_bi().await {
                         Ok(pair) => pair,
                         Err(_) => return,
@@ -674,8 +691,9 @@ impl Orchestrator {
                     status: "REJECTED_BY_PEER".to_string(),
                 });
             }
-            _ => {
-                warn!("Unhandled mesh message: {:?}", msg);
+            MeshMessage::Handshake { .. } => {
+                // Handshake is handled above in the reading loop to register connections
+                debug!("🤝 Handshake message processed");
             }
         }
     }

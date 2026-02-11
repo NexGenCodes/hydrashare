@@ -1,9 +1,12 @@
 use std::ffi::CString;
 use hydra_muscle::send_command_json;
+use tempfile::tempdir;
 
 #[test]
 fn test_ffi_json_command_valid() {
-    let cmd = r#"{"type": "INIT", "data_dir": "./test_data"}"#;
+    let dir = tempdir().expect("Failed to create temp dir");
+    let data_dir = dir.path().to_str().unwrap();
+    let cmd = format!(r#"{{"type": "INIT", "data_dir": "{}"}}"#, data_dir.replace("\\", "/"));
     let c_str = CString::new(cmd).unwrap();
     unsafe {
         let result = send_command_json(c_str.as_ptr());

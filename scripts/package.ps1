@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
-$DAEMON_ROOT = Resolve-Path "$PSScriptRoot\.."
-$PROJECT_ROOT = Resolve-Path "$DAEMON_ROOT\.."
+$PROJECT_ROOT = Resolve-Path "$PSScriptRoot\.."
+$DAEMON_ROOT = "$PROJECT_ROOT\daemon"
 $DIST_DIR = "$PROJECT_ROOT\dist"
 
 function Write-Step([string]$msg) {
@@ -37,18 +37,16 @@ if (Test-Path "$DAEMON_ROOT\bin\hydra_daemon.exe") {
 
 # 4. Android Package
 $androidBin = "$DAEMON_ROOT\bin\android"
-if (Test-Path "$androidBin\hydra_daemon.so") {
+if (Test-Path "$androidBin\libhydra_muscle.so") {
     Write-Host "  Packaging Android..." -ForegroundColor Yellow
     $androidDist = "$DIST_DIR\android"
     if (!(Test-Path $androidDist)) { New-Item -ItemType Directory -Path $androidDist | Out-Null }
     
-    Copy-Item "$androidBin\hydra_daemon.so" -Destination $androidDist -Force
     Copy-Item "$androidBin\libhydra_muscle.so" -Destination $androidDist -Force
     
     # Also copy to Flutter jniLibs for APK build
     $jniLibs = "$PROJECT_ROOT\frontend\android\app\src\main\jniLibs\arm64-v8a"
     if (!(Test-Path $jniLibs)) { New-Item -ItemType Directory -Path $jniLibs -Force | Out-Null }
-    Copy-Item "$androidBin\hydra_daemon.so" -Destination "$jniLibs\libhydra_daemon.so" -Force
     Copy-Item "$androidBin\libhydra_muscle.so" -Destination $jniLibs -Force
     
     Write-Host "  ✅ Android libraries: $jniLibs" -ForegroundColor Green

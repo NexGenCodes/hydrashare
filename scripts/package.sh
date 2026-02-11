@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DAEMON_ROOT="$PROJECT_ROOT/daemon"
 DIST_DIR="$PROJECT_ROOT/dist"
 
@@ -24,11 +24,10 @@ if [ -f "$DAEMON_ROOT/bin/hydra_daemon" ]; then
 fi
 
 # Package Android
-if [ -f "$DAEMON_ROOT/bin/android/hydra_daemon.so" ]; then
+if [ -f "$DAEMON_ROOT/bin/android/libhydra_muscle.so" ]; then
     echo "  Packaging Android..."
     JNILIBS="$PROJECT_ROOT/frontend/android/app/src/main/jniLibs/arm64-v8a"
     mkdir -p "$JNILIBS"
-    cp "$DAEMON_ROOT/bin/android/hydra_daemon.so" "$JNILIBS/libhydra_daemon.so"
     cp "$DAEMON_ROOT/bin/android/libhydra_muscle.so" "$JNILIBS/"
     echo "  ✅ Android libraries: $JNILIBS"
     echo "  ✅ Ready for: flutter build apk"

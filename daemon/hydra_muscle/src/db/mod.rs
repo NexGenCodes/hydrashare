@@ -16,7 +16,37 @@ impl Database {
         
         let db = Self { conn: Mutex::new(conn) };
         db.init_schema()?;
+        db.run_migrations()?;
         Ok(db)
+    }
+
+    fn run_migrations(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        // 1. Peer Table Migrations (is_banned, is_muted)
+        let mut has_banned = false;
+        let mut has_muted = false;
+
+        {
+            let mut stmt = conn.prepare("PRAGMA table_info(peers)")?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let name: String = row.get(1)?;
+                if name == "is_banned" { has_banned = true; }
+                if name == "is_muted" { has_muted = true; }
+            }
+        }
+
+        if !has_banned {
+            info!("MIGRATION: Adding is_banned to peers table");
+            conn.execute("ALTER TABLE peers ADD COLUMN is_banned INTEGER DEFAULT 0", [])?;
+        }
+        if !has_muted {
+            info!("MIGRATION: Adding is_muted to peers table");
+            conn.execute("ALTER TABLE peers ADD COLUMN is_muted INTEGER DEFAULT 0", [])?;
+        }
+
+        Ok(())
     }
 
     fn init_schema(&self) -> Result<()> {
@@ -41,6 +71,8 @@ impl Database {
                 pin_hash TEXT,
                 salt TEXT,
                 shared_key TEXT,
+                is_banned INTEGER DEFAULT 0,
+                is_muted INTEGER DEFAULT 0,
                 last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
@@ -116,7 +148,7 @@ impl Database {
 
     pub fn get_peer(&self, hydra_id: &str) -> Result<Option<PeerInfo>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT hydra_id, name, last_ip, public_port, bt_addr, shared_key FROM peers WHERE hydra_id = ?1")?;
+        let mut stmt = conn.prepare("SELECT hydra_id, name, last_ip, public_port, bt_addr, shared_key, is_banned, is_muted FROM peers WHERE hydra_id = ?1")?;
         let mut rows = stmt.query([hydra_id])?;
         
         if let Some(row) = rows.next()? {
@@ -125,6 +157,9 @@ impl Database {
                 .filter_map(|s| s.parse().ok())
                 .collect::<Vec<std::net::IpAddr>>();
             
+            let is_banned: i32 = row.get(6)?;
+            let is_muted: i32 = row.get(7)?;
+
             Ok(Some(PeerInfo {
                 peer_id: row.get(0)?,
                 name: row.get(1)?,
@@ -132,6 +167,8 @@ impl Database {
                 port: row.get(3)?,
                 bt_addr: row.get(4).ok(),
                 shared_key: row.get(5).ok(),
+                is_banned: is_banned != 0,
+                is_muted: is_muted != 0,
             }))
         } else {
             Ok(None)
@@ -141,9 +178,26 @@ impl Database {
     pub fn save_peer(&self, info: &PeerInfo) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let ips_str = info.ips.iter().map(|ip| ip.to_string()).collect::<Vec<_>>().join(",");
+
+        // Use INSERT OR IGNORE first, then UPDATE to preserve banned/muted status if we're doing a generic "save"
         conn.execute(
-            "INSERT OR REPLACE INTO peers (hydra_id, name, last_ip, public_port, bt_addr, shared_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            (&info.peer_id, &info.name, &ips_str, info.port, info.bt_addr, &info.shared_key),
+            "INSERT OR IGNORE INTO peers (hydra_id, name, last_ip, public_port, bt_addr, shared_key, is_banned, is_muted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (&info.peer_id, &info.name, &ips_str, info.port, info.bt_addr, &info.shared_key, if info.is_banned { 1 } else { 0 }, if info.is_muted { 1 } else { 0 }),
+        )?;
+
+        conn.execute(
+            "UPDATE peers SET name=?1, last_ip=?2, public_port=?3, bt_addr=?4, shared_key=COALESCE(?5, shared_key) WHERE hydra_id=?6",
+            (&info.name, &ips_str, info.port, info.bt_addr, &info.shared_key, &info.peer_id),
+        )?;
+
+        Ok(())
+    }
+
+    pub fn set_peer_status(&self, peer_id: &str, banned: bool, muted: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE peers SET is_banned = ?1, is_muted = ?2 WHERE hydra_id = ?3",
+            (if banned { 1 } else { 0 }, if muted { 1 } else { 0 }, peer_id),
         )?;
         Ok(())
     }
@@ -159,13 +213,16 @@ impl Database {
 
     pub fn get_all_peers(&self) -> Result<Vec<PeerInfo>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT hydra_id, name, last_ip, public_port, bt_addr, shared_key FROM peers")?;
+        let mut stmt = conn.prepare("SELECT hydra_id, name, last_ip, public_port, bt_addr, shared_key, is_banned, is_muted FROM peers")?;
         let rows = stmt.query_map([], |row| {
             let ips_str: String = row.get(2)?;
             let ips = ips_str.split(',')
                 .filter_map(|s| s.parse().ok())
                 .collect::<Vec<std::net::IpAddr>>();
             
+            let is_banned: i32 = row.get(6)?;
+            let is_muted: i32 = row.get(7)?;
+
             Ok(PeerInfo {
                 peer_id: row.get(0)?,
                 name: row.get(1)?,
@@ -173,6 +230,8 @@ impl Database {
                 port: row.get(3)?,
                 bt_addr: row.get(4).ok(),
                 shared_key: row.get(5).ok(),
+                is_banned: is_banned != 0,
+                is_muted: is_muted != 0,
             })
         })?;
         
@@ -192,8 +251,20 @@ impl Database {
 
     pub fn save_message(&self, msg: &MessageInfo) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+        // Use CURRENT_TIMESTAMP if msg.timestamp is empty or placeholder
+        let timestamp = if msg.timestamp.is_empty() || msg.timestamp == "PENDING" || msg.timestamp == "RECEIVED" {
+            "CURRENT_TIMESTAMP".to_string()
+        } else {
+            format!("'{}'", msg.timestamp)
+        };
+
+        let sql = format!(
+            "INSERT INTO messages (id, peer_id, text, timestamp, is_me, msg_type) VALUES (?1, ?2, ?3, {}, ?4, ?5)",
+            timestamp
+        );
+
         conn.execute(
-            "INSERT INTO messages (id, peer_id, text, timestamp, is_me, msg_type) VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP, ?4, ?5)",
+            &sql,
             (&msg.id, &msg.peer_id, &msg.text, if msg.is_me { 1 } else { 0 }, &msg.msg_type),
         )?;
         Ok(())
@@ -262,4 +333,6 @@ pub struct PeerInfo {
     pub port: u16,
     pub bt_addr: Option<u64>,
     pub shared_key: Option<String>,
+    pub is_banned: bool,
+    pub is_muted: bool,
 }

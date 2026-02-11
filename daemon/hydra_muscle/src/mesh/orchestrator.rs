@@ -94,6 +94,14 @@ impl Orchestrator {
         self.connections.read().map(|conns| conns.contains_key(peer_id)).unwrap_or(false)
     }
 
+    pub fn get_active_peer_ids(&self) -> Vec<String> {
+        if let Ok(conns) = self.connections.read() {
+            conns.keys().cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub async fn restore_peers_from_db(&self) {
         let db = self.db.clone();
         info!("🔄 Restoring peers from database...");
@@ -262,6 +270,16 @@ impl Orchestrator {
                             debug!("📩 Received handshake message type from stream");
                             if let MeshMessage::Handshake { ref peer_id, ref name } = msg {
                                 remote_peer_id = Some(peer_id.clone());
+
+                                // Send our handshake back so the initiator also registers us
+                                let reply = MeshMessage::Handshake {
+                                    name: hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|_| "Unknown".to_string()),
+                                    peer_id: orchestrator.local_peer_id.clone(),
+                                };
+                                if let Ok(reply_buf) = serde_json::to_vec(&reply) {
+                                    let _ = _send.write_all(&reply_buf).await;
+                                }
+
                                 // Register connection in bonding pool
                                 if let Ok(mut conns) = orchestrator.connections.write() {
                                     let entry = conns.entry(peer_id.clone()).or_insert_with(Vec::new);
@@ -285,6 +303,8 @@ impl Orchestrator {
                                             port: conn.remote_address().port(),
                                             bt_addr: None, 
                                             shared_key: orchestrator.mesh.get_peer(peer_id).and_then(|p| p.shared_key),
+                                            is_banned: false,
+                                            is_muted: false,
                                         };
                                         let _ = orchestrator.db.save_peer(&peer_info);
                                     }
@@ -455,28 +475,55 @@ impl Orchestrator {
     }
 
     async fn start_mesh_session(&self, conn: quinn::Connection) {
-        let (mut send, mut _recv) = match conn.open_bi().await {
+        let (mut send, mut recv_handshake) = match conn.open_bi().await {
             Ok(pair) => pair,
             Err(_) => return,
         };
 
-        let msg = MeshMessage::Handshake {
+        let handshake = MeshMessage::Handshake {
             name: hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|_| "Unknown".to_string()),
             peer_id: self.local_peer_id.clone(),
         };
 
-        if let Ok(buf) = serde_json::to_vec(&msg) {
+        if let Ok(buf) = serde_json::to_vec(&handshake) {
             let _ = send.write_all(&buf).await;
         }
         
-        // We can't Register connection here because we don't know the remote peer_id yet.
-        // It will be registered in the listener loop when we receive THEIR handshake.
+        let orch = Arc::new(self.clone());
+        let conn_clone = conn.clone();
+
+        // Task 1: Wait for reciprocal handshake on the handshake stream
+        crate::system::runtime::RUNTIME.spawn(async move {
+            let mut buf = vec![0u8; 65536];
+            if let Ok(Some(len)) = recv_handshake.read(&mut buf).await {
+                if let Ok(reply) = serde_json::from_slice::<MeshMessage>(&buf[..len]) {
+                    if let MeshMessage::Handshake { ref peer_id, ref name } = reply {
+                        if let Ok(mut conns) = orch.connections.write() {
+                            let entry = conns.entry(peer_id.clone()).or_insert_with(Vec::new);
+                            if !entry.iter().any(|c| c.remote_address() == conn_clone.remote_address()) {
+                                entry.push(conn_clone.clone());
+                                info!("🔗 Reciprocal handshake from {}: {}", peer_id, conn_clone.remote_address());
+
+                                crate::ffi::emit_event(crate::ffi::DaemonEvent::PeerConnected {
+                                    peer_id: peer_id.clone(),
+                                    name: name.clone(),
+                                    address: conn_clone.remote_address().ip().to_string(),
+                                    port: conn_clone.remote_address().port(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        });
         
         let orchestrator = Arc::new(self.clone());
+        let conn_clone2 = conn.clone();
+        // Task 2: Listen for NEW incoming streams on this connection
         crate::system::runtime::RUNTIME.spawn(async move {
             let mut buf = vec![0u8; 65536];
             let mut remote_id: Option<String> = None;
-            while let Ok(pair) = conn.accept_bi().await {
+            while let Ok(pair) = conn_clone2.accept_bi().await {
                 let mut recv = pair.1;
                 while let Ok(Some(len)) = recv.read(&mut buf).await {
                     if let Ok(msg) = serde_json::from_slice::<MeshMessage>(&buf[..len]) {
@@ -484,25 +531,27 @@ impl Orchestrator {
                             remote_id = Some(peer_id.clone());
                             if let Ok(mut conns) = orchestrator.connections.write() {
                                 let entry = conns.entry(peer_id.clone()).or_insert_with(Vec::new);
-                                if !entry.iter().any(|c| c.remote_address() == conn.remote_address()) {
-                                    entry.push(conn.clone());
+                                if !entry.iter().any(|c| c.remote_address() == conn_clone2.remote_address()) {
+                                    entry.push(conn_clone2.clone());
                                     
                                     // Emit PeerConnected event for outgoing connection
                                     crate::ffi::emit_event(crate::ffi::DaemonEvent::PeerConnected {
                                         peer_id: peer_id.clone(),
                                         name: name.clone(),
-                                        address: conn.remote_address().ip().to_string(),
-                                        port: conn.remote_address().port(),
+                                        address: conn_clone2.remote_address().ip().to_string(),
+                                        port: conn_clone2.remote_address().port(),
                                     });
 
                                     // Auto-save peer to DB
                                     let peer_info = crate::db::PeerInfo {
                                         peer_id: peer_id.clone(),
                                         name: name.clone(),
-                                        ips: vec![conn.remote_address().ip()],
-                                        port: conn.remote_address().port(),
+                                        ips: vec![conn_clone2.remote_address().ip()],
+                                        port: conn_clone2.remote_address().port(),
                                         bt_addr: None, 
                                         shared_key: orchestrator.mesh.get_peer(peer_id).and_then(|p| p.shared_key),
+                                        is_banned: false,
+                                        is_muted: false,
                                     };
                                     let _ = orchestrator.db.save_peer(&peer_info);
                                 }
@@ -550,6 +599,14 @@ impl Orchestrator {
             hbs.insert(peer_id.to_string(), SystemTime::now());
         }
 
+        // 0. Filter Banned Peers
+        if let Ok(Some(info)) = self.db.get_peer(peer_id) {
+            if info.is_banned {
+                debug!("🚫 Ignoring message from banned peer: {}", peer_id);
+                return;
+            }
+        }
+
         match msg {
             MeshMessage::Heartbeat { health } => {
                 if let Some(h) = health {
@@ -559,6 +616,14 @@ impl Orchestrator {
                 }
             },
             MeshMessage::Chat { text, target_peer_id } => {
+                // Filter Muted Peers
+                if let Ok(Some(info)) = self.db.get_peer(peer_id) {
+                    if info.is_muted {
+                        debug!("🔇 Ignoring chat from muted peer: {}", peer_id);
+                        return;
+                    }
+                }
+
                 if let Some(ref target) = target_peer_id {
                     if target != &self.local_peer_id {
                         info!("🔀 Smart Mesh: Forwarding chat to {}", target);
@@ -572,7 +637,23 @@ impl Orchestrator {
                     }
                 }
                 info!("💬 Chat from {}: {}", peer_id, text);
-                emit_event(DaemonEvent::LogMessage { level: "CHAT".into(), message: format!("{}: {}", peer_id, text) });
+
+                // 1. Save to local DB
+                let msg = crate::db::MessageInfo {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    peer_id: peer_id.to_string(),
+                    text: text.clone(),
+                    timestamp: "RECEIVED".to_string(),
+                    is_me: false,
+                    msg_type: "text".to_string(),
+                };
+                let _ = self.db.save_message(&msg);
+
+                // 2. Emit refined event
+                emit_event(DaemonEvent::IncomingChat {
+                    peer_id: peer_id.to_string(),
+                    text: text.clone()
+                });
             },
             MeshMessage::DiscoveryCard { peer_id: discovered_id, name, ips, port } => {
                 info!("🤝 Discovery card for {} via {}", name, peer_id);
@@ -583,6 +664,8 @@ impl Orchestrator {
                     port,
                     bt_addr: None,
                     shared_key: None,
+                    is_banned: false,
+                    is_muted: false,
                 });
             },
             MeshMessage::G2gTransferReq { ref target_peer_id, .. } => {

@@ -64,6 +64,20 @@ sealed class DaemonCommand with _$DaemonCommand {
     required int port,
     String? encryptionKey,
   }) = DaemonCommand_ConnectPeer;
+  const factory DaemonCommand.sendMessage({
+    required String peerId,
+    required String text,
+  }) = DaemonCommand_SendMessage;
+  const factory DaemonCommand.broadcastChat({required String text}) =
+      DaemonCommand_BroadcastChat;
+  const factory DaemonCommand.banPeer({
+    required String peerId,
+    required bool ban,
+  }) = DaemonCommand_BanPeer;
+  const factory DaemonCommand.mutePeer({
+    required String peerId,
+    required bool mute,
+  }) = DaemonCommand_MutePeer;
   const factory DaemonCommand.stopDiscovery() = DaemonCommand_StopDiscovery;
   const factory DaemonCommand.disconnectPeer({required String peerId}) =
       DaemonCommand_DisconnectPeer;
@@ -133,4 +147,8 @@ sealed class DaemonEvent with _$DaemonEvent {
     required String address,
     required int port,
   }) = DaemonEvent_PeerConnected;
+  const factory DaemonEvent.incomingChat({
+    required String peerId,
+    required String text,
+  }) = DaemonEvent_IncomingChat;
 }

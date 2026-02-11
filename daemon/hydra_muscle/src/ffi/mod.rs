@@ -18,8 +18,6 @@ use std::panic;
 
 pub static EVENT_QUEUE: Lazy<Mutex<VecDeque<Vec<u8>>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 static ENGINE: Lazy<Arc<Mutex<Option<EngineState>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
-static mut DATABASE: Option<Arc<Database>> = None;
-static mut TRANSFER_MANAGER: Option<Arc<TransferManager>> = None;
 use crate::system::runtime::RUNTIME;
 
 
@@ -93,6 +91,10 @@ pub enum DaemonEvent {
         address: String,
         port: u16,
     },
+    IncomingChat {
+        peer_id: String,
+        text: String,
+    },
 }
 
 #[derive(Archive, RkyvDeserialize, RkyvSerialize, Deserialize, Debug)]
@@ -138,6 +140,21 @@ pub enum DaemonCommand {
         address: String,
         port: u16,
         encryption_key: Option<String>,
+    },
+    SendMessage {
+        peer_id: String,
+        text: String,
+    },
+    BroadcastChat {
+        text: String,
+    },
+    BanPeer {
+        peer_id: String,
+        ban: bool,
+    },
+    MutePeer {
+        peer_id: String,
+        mute: bool,
     },
     StopDiscovery,
     DisconnectPeer {
@@ -248,10 +265,6 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             let mesh = Arc::new(MeshNetwork::new());
             let transfer = Arc::new(TransferManager::new(db.clone()));
             
-            unsafe {
-                DATABASE = Some(db.clone());
-                TRANSFER_MANAGER = Some(transfer.clone());
-            }
             let my_id = match db.get_config("hydra_priv_key").unwrap_or(None) {
                 Some(key) => Identity::from_saved(&key).unwrap_or_else(|_| Identity::generate()),
                 None => Identity::generate(),
@@ -301,13 +314,69 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
                 return -4;
             }
         }
+        DaemonCommand::BroadcastChat { text } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let orchestrator = state.orchestrator.clone();
+                let text_clone = text.clone();
+                RUNTIME.spawn(async move {
+                    let msg = crate::mesh::orchestrator::MeshMessage::Chat {
+                        text: text_clone,
+                        target_peer_id: None,
+                    };
+                    // Use get_all_peers from mesh or connections
+                    // Actually, orchestrator knows active connections
+                    let peer_ids = orchestrator.get_active_peer_ids();
+                    for id in peer_ids {
+                        let _ = orchestrator.send_to_peer(&id, msg.clone()).await;
+                    }
+                });
+                return 0;
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::BanPeer { peer_id, ban } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let db = state.db.clone();
+                let orchestrator = state.orchestrator.clone();
+                let peer_id_clone = peer_id.clone();
+
+                if let Ok(Some(info)) = db.get_peer(&peer_id) {
+                    let _ = db.set_peer_status(&peer_id, ban, info.is_muted);
+                    if ban {
+                        RUNTIME.spawn(async move {
+                            orchestrator.disconnect_peer(&peer_id_clone).await;
+                        });
+                    }
+                }
+                return 0;
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::MutePeer { peer_id, mute } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let db = state.db.clone();
+                if let Ok(Some(info)) = db.get_peer(&peer_id) {
+                    let _ = db.set_peer_status(&peer_id, info.is_banned, mute);
+                }
+                return 0;
+            } else {
+                return -4;
+            }
+        }
         DaemonCommand::StopEngine => {
             let mut engine = ENGINE.lock().unwrap();
             *engine = None;
             info!("🛑 Engine stopped");
         }
         DaemonCommand::SaveMessage { message } => {
-            if let Some(db) = unsafe { DATABASE.as_ref() } {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let db = state.db.clone();
                 match serde_json::from_str::<crate::db::MessageInfo>(&message) {
                     Ok(msg) => {
                         if let Err(e) = db.save_message(&msg) {
@@ -327,7 +396,9 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             }
         }
         DaemonCommand::GetMessages { peer_id } => {
-            if let Some(db) = unsafe { DATABASE.as_ref() } {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let db = state.db.clone();
                 match db.get_messages(&peer_id) {
                     Ok(messages) => {
                         match serde_json::to_string(&messages) {
@@ -345,6 +416,43 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
                 }
             } else {
                 return -3;
+            }
+        }
+        DaemonCommand::SendMessage { peer_id, text } => {
+            let engine = match ENGINE.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!("❌ ENGINE Mutex poisoned: {}", e);
+                    return -4;
+                }
+            };
+            if let Some(state) = engine.as_ref() {
+                let orchestrator = state.orchestrator.clone();
+                let db = state.db.clone();
+                let peer_id_clone = peer_id.clone();
+                let text_clone = text.clone();
+
+                RUNTIME.spawn(async move {
+                    // 1. Save to local DB
+                    let msg = crate::db::MessageInfo {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        peer_id: peer_id_clone.clone(),
+                        text: text_clone.clone(),
+                        timestamp: "PENDING".to_string(), // DB will set actual timestamp via CURRENT_TIMESTAMP
+                        is_me: true,
+                        msg_type: "text".to_string(),
+                    };
+                    let _ = db.save_message(&msg);
+
+                    // 2. Send via Mesh
+                    let _ = orchestrator.send_to_peer(&peer_id_clone, crate::mesh::orchestrator::MeshMessage::Chat {
+                        text: text_clone,
+                        target_peer_id: None,
+                    }).await;
+                });
+                return 0;
+            } else {
+                return -4;
             }
         }
 
@@ -727,6 +835,8 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
                         port,
                         bt_addr: None,
                         shared_key: encryption_key.clone(),
+                        is_banned: false,
+                        is_muted: false,
                     };
                     
                     // Add to mesh

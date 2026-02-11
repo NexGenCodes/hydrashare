@@ -39,10 +39,11 @@ if [ "$BUILD_HOST" = true ]; then
     elif [ -f "$RUST_DIR/target/release/libhydra_muscle.dylib" ]; then
         cp "$RUST_DIR/target/release/libhydra_muscle.dylib" "$DAEMON_ROOT/bin/"
     fi
-    
-    export CGO_ENABLED=1
-    export CGO_LDFLAGS="-L$DAEMON_ROOT/bin -lhydra_muscle"
-    go build -o bin/hydra_daemon ./cmd/hydra_daemon
+
+    # Copy binary
+    if [ -f "$RUST_DIR/target/release/hydra_daemon" ]; then
+        cp "$RUST_DIR/target/release/hydra_daemon" "$DAEMON_ROOT/bin/"
+    fi
     
     echo "✅ Host build complete: daemon/bin/hydra_daemon"
 fi
@@ -70,12 +71,10 @@ if [ "$BUILD_ANDROID" = true ]; then
     mkdir -p bin/android
     cp "$RUST_DIR/target/aarch64-linux-android/release/libhydra_muscle.so" bin/android/
     
-    export GOOS=android
-    export GOARCH=arm64
-    export CGO_ENABLED=1
-    export CC="$TOOLCHAIN/${TARGET}-clang"
-    export CGO_LDFLAGS="-L$DAEMON_ROOT/bin/android -lhydra_muscle"
-    go build -buildmode=c-shared -o bin/android/hydra_daemon.so ./cmd/hydra_daemon
+    # Copy binary (if built for android, though usually it's just the lib for Android)
+    if [ -f "$RUST_DIR/target/aarch64-linux-android/release/hydra_daemon" ]; then
+        cp "$RUST_DIR/target/aarch64-linux-android/release/hydra_daemon" bin/android/
+    fi
     
     echo "✅ Android build complete: daemon/bin/android/"
 fi

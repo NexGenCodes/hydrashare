@@ -105,8 +105,14 @@ pub async fn run_quic_transfer(
                 } else {
                     crate::system::SystemHealth::Optimal
                 };
-                if health != crate::system::SystemHealth::Optimal {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                match health {
+                    crate::system::SystemHealth::Emergency => {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    },
+                    crate::system::SystemHealth::Throttled => {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    },
+                    crate::system::SystemHealth::Optimal => {},
                 }
                 let current_idx = next_chunk.fetch_add(1, Ordering::SeqCst);
                 let offset = (current_idx as u64) * (BLOCK_SIZE as u64);
@@ -226,6 +232,20 @@ pub async fn run_quic_transfer_fd(
             let mut file = File::open(&*f_path).await.map_err(|_| ERROR_FILE_NOT_FOUND)?;
             loop {
                 if let Some(ref c) = cancel { if c.load(Ordering::Relaxed) != 0 { return Err(ERROR_CANCELLED); } }
+                let health = if let Ok(guard) = crate::system::INTELLIGENCE.read() {
+                    guard.get_health()
+                } else {
+                    crate::system::SystemHealth::Optimal
+                };
+                match health {
+                    crate::system::SystemHealth::Emergency => {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    },
+                    crate::system::SystemHealth::Throttled => {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    },
+                    crate::system::SystemHealth::Optimal => {},
+                }
                 let current_idx = next_chunk.fetch_add(1, Ordering::SeqCst);
                 let offset = (current_idx as u64) * (BLOCK_SIZE as u64);
                 if offset >= file_size as u64 { break; }
@@ -372,8 +392,14 @@ pub async fn run_quic_transfer_session(
             loop {
                 if let Some(ref c) = cancel { if c.load(Ordering::Relaxed) != 0 { return Err(ERROR_CANCELLED); } }
                 let health = crate::system::INTELLIGENCE.read().unwrap().get_health();
-                if health != crate::system::SystemHealth::Optimal {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                match health {
+                    crate::system::SystemHealth::Emergency => {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    },
+                    crate::system::SystemHealth::Throttled => {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    },
+                    crate::system::SystemHealth::Optimal => {},
                 }
                 let current_idx = next_chunk.fetch_add(1, Ordering::SeqCst);
                 let offset = (current_idx as u64) * (BLOCK_SIZE as u64);

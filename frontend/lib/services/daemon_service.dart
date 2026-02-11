@@ -191,16 +191,9 @@ class DaemonService {
           } else if (type == 'RECEIVE_STARTED') {
             debugPrint('📥 Incoming transfer started from: ${response['ip']}');
           } else if (type == 'INCOMING_CHAT') {
-            final peerIp = response['ip'] ?? 'Broadcast';
-            StorageService().saveMessage(
-              peerIp: peerIp,
-              text: response['text'] ?? '',
-              isMe: false,
-            );
+            // Already saved by Rust backend in new version
             _chatController.add(response);
-            if (response['unread'] == true) {
-              _incrementUnread(response['ip']);
-            }
+            _incrementUnread(response['ip']);
           } else if (type == 'FILE_OFFER') {
             final peerIp = response['ip'] ?? 'Broadcast';
             StorageService().saveMessage(
@@ -317,6 +310,12 @@ class DaemonService {
         'name': name,
         'ip': address,
         'port': port,
+      },
+      incomingChat: (peerId, text) => {
+        'type': 'INCOMING_CHAT',
+        'ip': peerId, // ip field used for peer identification in legacy UI
+        'text': text,
+        'unread': true,
       },
     );
   }
@@ -649,8 +648,7 @@ class DaemonService {
 
   /// Send a private chat message to a peer
   Future<void> sendChat(String peerIp, String text) async {
-    await StorageService().saveMessage(peerIp: peerIp, text: text, isMe: true);
-    debugPrint('❌ SEND_CHAT not implemented in Rust backend yet.');
+    await rust_api.sendMessage(peerId: peerIp, text: text);
   }
 
   /// Alias for sendChat to maintain backward compatibility
@@ -659,7 +657,7 @@ class DaemonService {
 
   /// Broadcast a chat message to all connected peers (Host only)
   Future<void> broadcastChat(String text) async {
-    debugPrint('❌ BROADCAST_CHAT not implemented in Rust backend yet.');
+    await rust_api.broadcastChat(text: text);
   }
 
   /// Get message history for a peer
@@ -848,12 +846,12 @@ class DaemonService {
 
   /// Admin: Ban a peer (Block IP)
   Future<void> banPeer(String ip) async {
-    debugPrint('❌ BAN_PEER not implemented in Rust backend yet.');
+    await rust_api.banPeer(peerId: ip, ban: true);
   }
 
   /// Admin: Mute or Unmute a peer
   Future<void> mutePeer(String ip, bool mute) async {
-    debugPrint('❌ MUTE_PEER not implemented in Rust backend yet.');
+    await rust_api.mutePeer(peerId: ip, mute: mute);
   }
 
   /// Settings: Set Max File Size

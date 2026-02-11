@@ -51,6 +51,18 @@ Future<int> saveMessage({required String message}) =>
 Future<int> getMessages({required String peerId}) =>
     RustLib.instance.api.crateApiGetMessages(peerId: peerId);
 
+Future<int> sendMessage({required String peerId, required String text}) =>
+    RustLib.instance.api.crateApiSendMessage(peerId: peerId, text: text);
+
+Future<int> broadcastChat({required String text}) =>
+    RustLib.instance.api.crateApiBroadcastChat(text: text);
+
+Future<int> banPeer({required String peerId, required bool ban}) =>
+    RustLib.instance.api.crateApiBanPeer(peerId: peerId, ban: ban);
+
+Future<int> mutePeer({required String peerId, required bool mute}) =>
+    RustLib.instance.api.crateApiMutePeer(peerId: peerId, mute: mute);
+
 Future<int> rejectFile({required String offerId, required String peerId}) =>
     RustLib.instance.api.crateApiRejectFile(offerId: offerId, peerId: peerId);
 

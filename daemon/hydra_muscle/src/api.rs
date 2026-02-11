@@ -61,6 +61,21 @@ pub fn get_messages(peer_id: String) -> i32 {
     handle_command(DaemonCommand::GetMessages { peer_id })
 }
 
+pub fn send_message(peer_id: String, text: String) -> i32 {
+    handle_command(DaemonCommand::SendMessage { peer_id, text })
+}
+
+pub fn broadcast_chat(text: String) -> i32 {
+    handle_command(DaemonCommand::BroadcastChat { text })
+}
+
+pub fn ban_peer(peer_id: String, ban: bool) -> i32 {
+    handle_command(DaemonCommand::BanPeer { peer_id, ban })
+}
+
+pub fn mute_peer(peer_id: String, mute: bool) -> i32 {
+    handle_command(DaemonCommand::MutePeer { peer_id, mute })
+}
 
 pub fn reject_file(offer_id: String, peer_id: String) -> i32 {
     handle_command(DaemonCommand::RejectFile { offer_id, peer_id })

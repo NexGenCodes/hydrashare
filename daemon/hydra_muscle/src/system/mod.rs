@@ -25,12 +25,17 @@ impl Intelligence {
     pub fn refresh(&mut self) {
         self.sys.refresh_all();
         
-        // Intelligence Logic: Determine health based on battery and thermal
+        // Determine health based on CPU load and Memory pressure
+        let cpu_load = self.sys.global_cpu_info().cpu_usage();
+        let total_mem = self.sys.total_memory();
+        let used_mem = self.sys.used_memory();
+        let mem_usage = (used_mem as f64 / total_mem as f64) * 100.0;
+
         let mut new_health = SystemHealth::Optimal;
 
-        // Placeholder for real battery check
-        let cpu_load = self.sys.global_cpu_info().cpu_usage();
-        if cpu_load > 90.0 {
+        if cpu_load > 95.0 || mem_usage > 95.0 {
+            new_health = SystemHealth::Emergency;
+        } else if cpu_load > 80.0 || mem_usage > 85.0 {
             new_health = SystemHealth::Throttled;
         }
 

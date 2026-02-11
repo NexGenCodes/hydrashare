@@ -81,6 +81,8 @@ impl DiscoveryService {
                                         port: info.get_port(),
                                         bt_addr,
                                         shared_key: None,
+                                        is_banned: false,
+                                        is_muted: false,
                                     };
                                     peers.update_peer_discovery(peer_info.clone());
 
@@ -185,6 +187,8 @@ impl DiscoveryService {
                                                 port: 0,
                                                 bt_addr: other.bt_addr,
                                                 shared_key: None,
+                                                is_banned: false,
+                                                is_muted: false,
                                             });
                                             peer.shared_key = Some(key);
                                             mesh.update_peer_discovery(peer);
@@ -202,6 +206,8 @@ impl DiscoveryService {
                                                 port: 0,
                                                 bt_addr: other.bt_addr,
                                                 shared_key: None,
+                                                is_banned: false,
+                                                is_muted: false,
                                             });
                                             peer.shared_key = Some(key);
                                             mesh.update_peer_discovery(peer);
@@ -250,6 +256,8 @@ impl DiscoveryService {
                                     port,
                                     bt_addr: other.bt_addr,
                                     shared_key: None,
+                                    is_banned: false,
+                                    is_muted: false,
                                 };
                                 mesh.update_peer_discovery(peer_info.clone());
                                 info!("🔭 LDT: Discovered remote peer {} at {:?}", other.peer_id, target_addrs);
@@ -370,6 +378,8 @@ impl DiscoveryService {
                 port,
                 bt_addr: None,
                 shared_key: auth_key,
+                is_banned: false,
+                is_muted: false,
             };
             self.mesh.update_peer_discovery(peer_info);
 

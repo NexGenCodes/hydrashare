@@ -68,6 +68,16 @@ sealed class DaemonCommand with _$DaemonCommand {
     required String peerId,
     required String text,
   }) = DaemonCommand_SendMessage;
+  const factory DaemonCommand.broadcastChat({required String text}) =
+      DaemonCommand_BroadcastChat;
+  const factory DaemonCommand.banPeer({
+    required String peerId,
+    required bool ban,
+  }) = DaemonCommand_BanPeer;
+  const factory DaemonCommand.mutePeer({
+    required String peerId,
+    required bool mute,
+  }) = DaemonCommand_MutePeer;
   const factory DaemonCommand.stopDiscovery() = DaemonCommand_StopDiscovery;
   const factory DaemonCommand.disconnectPeer({required String peerId}) =
       DaemonCommand_DisconnectPeer;

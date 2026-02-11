@@ -657,7 +657,7 @@ class DaemonService {
 
   /// Broadcast a chat message to all connected peers (Host only)
   Future<void> broadcastChat(String text) async {
-    debugPrint('❌ BROADCAST_CHAT not implemented in Rust backend yet.');
+    await rust_api.broadcastChat(text: text);
   }
 
   /// Get message history for a peer
@@ -846,12 +846,12 @@ class DaemonService {
 
   /// Admin: Ban a peer (Block IP)
   Future<void> banPeer(String ip) async {
-    debugPrint('❌ BAN_PEER not implemented in Rust backend yet.');
+    await rust_api.banPeer(peerId: ip, ban: true);
   }
 
   /// Admin: Mute or Unmute a peer
   Future<void> mutePeer(String ip, bool mute) async {
-    debugPrint('❌ MUTE_PEER not implemented in Rust backend yet.');
+    await rust_api.mutePeer(peerId: ip, mute: mute);
   }
 
   /// Settings: Set Max File Size

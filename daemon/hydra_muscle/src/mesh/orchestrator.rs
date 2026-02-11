@@ -94,6 +94,14 @@ impl Orchestrator {
         self.connections.read().map(|conns| conns.contains_key(peer_id)).unwrap_or(false)
     }
 
+    pub fn get_active_peer_ids(&self) -> Vec<String> {
+        if let Ok(conns) = self.connections.read() {
+            conns.keys().cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
     pub async fn restore_peers_from_db(&self) {
         let db = self.db.clone();
         info!("🔄 Restoring peers from database...");
@@ -295,6 +303,8 @@ impl Orchestrator {
                                             port: conn.remote_address().port(),
                                             bt_addr: None, 
                                             shared_key: orchestrator.mesh.get_peer(peer_id).and_then(|p| p.shared_key),
+                                            is_banned: false,
+                                            is_muted: false,
                                         };
                                         let _ = orchestrator.db.save_peer(&peer_info);
                                     }
@@ -540,6 +550,8 @@ impl Orchestrator {
                                         port: conn_clone2.remote_address().port(),
                                         bt_addr: None, 
                                         shared_key: orchestrator.mesh.get_peer(peer_id).and_then(|p| p.shared_key),
+                                        is_banned: false,
+                                        is_muted: false,
                                     };
                                     let _ = orchestrator.db.save_peer(&peer_info);
                                 }
@@ -587,6 +599,14 @@ impl Orchestrator {
             hbs.insert(peer_id.to_string(), SystemTime::now());
         }
 
+        // 0. Filter Banned Peers
+        if let Ok(Some(info)) = self.db.get_peer(peer_id) {
+            if info.is_banned {
+                debug!("🚫 Ignoring message from banned peer: {}", peer_id);
+                return;
+            }
+        }
+
         match msg {
             MeshMessage::Heartbeat { health } => {
                 if let Some(h) = health {
@@ -596,6 +616,14 @@ impl Orchestrator {
                 }
             },
             MeshMessage::Chat { text, target_peer_id } => {
+                // Filter Muted Peers
+                if let Ok(Some(info)) = self.db.get_peer(peer_id) {
+                    if info.is_muted {
+                        debug!("🔇 Ignoring chat from muted peer: {}", peer_id);
+                        return;
+                    }
+                }
+
                 if let Some(ref target) = target_peer_id {
                     if target != &self.local_peer_id {
                         info!("🔀 Smart Mesh: Forwarding chat to {}", target);
@@ -636,6 +664,8 @@ impl Orchestrator {
                     port,
                     bt_addr: None,
                     shared_key: None,
+                    is_banned: false,
+                    is_muted: false,
                 });
             },
             MeshMessage::G2gTransferReq { ref target_peer_id, .. } => {

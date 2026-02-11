@@ -145,6 +145,17 @@ pub enum DaemonCommand {
         peer_id: String,
         text: String,
     },
+    BroadcastChat {
+        text: String,
+    },
+    BanPeer {
+        peer_id: String,
+        ban: bool,
+    },
+    MutePeer {
+        peer_id: String,
+        mute: bool,
+    },
     StopDiscovery,
     DisconnectPeer {
         peer_id: String,
@@ -299,6 +310,60 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
                     info!("📢 Discovery started on port {}", port);
                 });
                 info!("📢 Discovery and Orchestration started");
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::BroadcastChat { text } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let orchestrator = state.orchestrator.clone();
+                let text_clone = text.clone();
+                RUNTIME.spawn(async move {
+                    let msg = crate::mesh::orchestrator::MeshMessage::Chat {
+                        text: text_clone,
+                        target_peer_id: None,
+                    };
+                    // Use get_all_peers from mesh or connections
+                    // Actually, orchestrator knows active connections
+                    let peer_ids = orchestrator.get_active_peer_ids();
+                    for id in peer_ids {
+                        let _ = orchestrator.send_to_peer(&id, msg.clone()).await;
+                    }
+                });
+                return 0;
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::BanPeer { peer_id, ban } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let db = state.db.clone();
+                let orchestrator = state.orchestrator.clone();
+                let peer_id_clone = peer_id.clone();
+
+                if let Ok(Some(info)) = db.get_peer(&peer_id) {
+                    let _ = db.set_peer_status(&peer_id, ban, info.is_muted);
+                    if ban {
+                        RUNTIME.spawn(async move {
+                            orchestrator.disconnect_peer(&peer_id_clone).await;
+                        });
+                    }
+                }
+                return 0;
+            } else {
+                return -4;
+            }
+        }
+        DaemonCommand::MutePeer { peer_id, mute } => {
+            let engine = ENGINE.lock().unwrap();
+            if let Some(state) = engine.as_ref() {
+                let db = state.db.clone();
+                if let Ok(Some(info)) = db.get_peer(&peer_id) {
+                    let _ = db.set_peer_status(&peer_id, info.is_banned, mute);
+                }
+                return 0;
             } else {
                 return -4;
             }
@@ -770,6 +835,8 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
                         port,
                         bt_addr: None,
                         shared_key: encryption_key.clone(),
+                        is_banned: false,
+                        is_muted: false,
                     };
                     
                     // Add to mesh

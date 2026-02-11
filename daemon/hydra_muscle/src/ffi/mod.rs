@@ -1,4 +1,4 @@
-use std::sync::{Mutex, Arc, RwLock};
+use std::sync::{Mutex, Arc};
 use std::collections::VecDeque;
 use std::ffi::CString;
 use once_cell::sync::Lazy;
@@ -18,8 +18,6 @@ use std::panic;
 
 pub static EVENT_QUEUE: Lazy<Mutex<VecDeque<Vec<u8>>>> = Lazy::new(|| Mutex::new(VecDeque::new()));
 static ENGINE: Lazy<Arc<Mutex<Option<EngineState>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
-static DATABASE: Lazy<RwLock<Option<Arc<Database>>>> = Lazy::new(|| RwLock::new(None));
-static TRANSFER_MANAGER: Lazy<RwLock<Option<Arc<TransferManager>>>> = Lazy::new(|| RwLock::new(None));
 use crate::system::runtime::RUNTIME;
 
 
@@ -92,6 +90,10 @@ pub enum DaemonEvent {
         name: String,
         address: String,
         port: u16,
+    },
+    IncomingChat {
+        peer_id: String,
+        text: String,
     },
 }
 
@@ -252,13 +254,6 @@ pub fn handle_command(command: DaemonCommand) -> i32 {
             let mesh = Arc::new(MeshNetwork::new());
             let transfer = Arc::new(TransferManager::new(db.clone()));
             
-            if let Ok(mut db_guard) = DATABASE.write() {
-                *db_guard = Some(db.clone());
-            }
-            if let Ok(mut tm_guard) = TRANSFER_MANAGER.write() {
-                *tm_guard = Some(transfer.clone());
-            }
-
             let my_id = match db.get_config("hydra_priv_key").unwrap_or(None) {
                 Some(key) => Identity::from_saved(&key).unwrap_or_else(|_| Identity::generate()),
                 None => Identity::generate(),

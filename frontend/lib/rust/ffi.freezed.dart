@@ -1679,7 +1679,7 @@ extension DaemonEventPatterns on DaemonEvent {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( DaemonEvent_PeerDiscovered value)?  peerDiscovered,TResult Function( DaemonEvent_PeerLost value)?  peerLost,TResult Function( DaemonEvent_TransferProgress value)?  transferProgress,TResult Function( DaemonEvent_TransferComplete value)?  transferComplete,TResult Function( DaemonEvent_PairingRequest value)?  pairingRequest,TResult Function( DaemonEvent_TransferOffer value)?  transferOffer,TResult Function( DaemonEvent_LogMessage value)?  logMessage,TResult Function( DaemonEvent_CredentialsGenerated value)?  credentialsGenerated,TResult Function( DaemonEvent_QrPayloadGenerated value)?  qrPayloadGenerated,TResult Function( DaemonEvent_SettingReported value)?  settingReported,TResult Function( DaemonEvent_SessionCodeGenerated value)?  sessionCodeGenerated,TResult Function( DaemonEvent_SignalingStarted value)?  signalingStarted,TResult Function( DaemonEvent_CodeGenerated value)?  codeGenerated,TResult Function( DaemonEvent_PeerDisconnected value)?  peerDisconnected,TResult Function( DaemonEvent_PeerConnected value)?  peerConnected,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( DaemonEvent_PeerDiscovered value)?  peerDiscovered,TResult Function( DaemonEvent_PeerLost value)?  peerLost,TResult Function( DaemonEvent_TransferProgress value)?  transferProgress,TResult Function( DaemonEvent_TransferComplete value)?  transferComplete,TResult Function( DaemonEvent_PairingRequest value)?  pairingRequest,TResult Function( DaemonEvent_TransferOffer value)?  transferOffer,TResult Function( DaemonEvent_LogMessage value)?  logMessage,TResult Function( DaemonEvent_CredentialsGenerated value)?  credentialsGenerated,TResult Function( DaemonEvent_QrPayloadGenerated value)?  qrPayloadGenerated,TResult Function( DaemonEvent_SettingReported value)?  settingReported,TResult Function( DaemonEvent_SessionCodeGenerated value)?  sessionCodeGenerated,TResult Function( DaemonEvent_SignalingStarted value)?  signalingStarted,TResult Function( DaemonEvent_CodeGenerated value)?  codeGenerated,TResult Function( DaemonEvent_PeerDisconnected value)?  peerDisconnected,TResult Function( DaemonEvent_PeerConnected value)?  peerConnected,TResult Function( DaemonEvent_IncomingChat value)?  incomingChat,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case DaemonEvent_PeerDiscovered() when peerDiscovered != null:
@@ -1697,7 +1697,8 @@ return sessionCodeGenerated(_that);case DaemonEvent_SignalingStarted() when sign
 return signalingStarted(_that);case DaemonEvent_CodeGenerated() when codeGenerated != null:
 return codeGenerated(_that);case DaemonEvent_PeerDisconnected() when peerDisconnected != null:
 return peerDisconnected(_that);case DaemonEvent_PeerConnected() when peerConnected != null:
-return peerConnected(_that);case _:
+return peerConnected(_that);case DaemonEvent_IncomingChat() when incomingChat != null:
+return incomingChat(_that);case _:
   return orElse();
 
 }
@@ -1715,7 +1716,7 @@ return peerConnected(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( DaemonEvent_PeerDiscovered value)  peerDiscovered,required TResult Function( DaemonEvent_PeerLost value)  peerLost,required TResult Function( DaemonEvent_TransferProgress value)  transferProgress,required TResult Function( DaemonEvent_TransferComplete value)  transferComplete,required TResult Function( DaemonEvent_PairingRequest value)  pairingRequest,required TResult Function( DaemonEvent_TransferOffer value)  transferOffer,required TResult Function( DaemonEvent_LogMessage value)  logMessage,required TResult Function( DaemonEvent_CredentialsGenerated value)  credentialsGenerated,required TResult Function( DaemonEvent_QrPayloadGenerated value)  qrPayloadGenerated,required TResult Function( DaemonEvent_SettingReported value)  settingReported,required TResult Function( DaemonEvent_SessionCodeGenerated value)  sessionCodeGenerated,required TResult Function( DaemonEvent_SignalingStarted value)  signalingStarted,required TResult Function( DaemonEvent_CodeGenerated value)  codeGenerated,required TResult Function( DaemonEvent_PeerDisconnected value)  peerDisconnected,required TResult Function( DaemonEvent_PeerConnected value)  peerConnected,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( DaemonEvent_PeerDiscovered value)  peerDiscovered,required TResult Function( DaemonEvent_PeerLost value)  peerLost,required TResult Function( DaemonEvent_TransferProgress value)  transferProgress,required TResult Function( DaemonEvent_TransferComplete value)  transferComplete,required TResult Function( DaemonEvent_PairingRequest value)  pairingRequest,required TResult Function( DaemonEvent_TransferOffer value)  transferOffer,required TResult Function( DaemonEvent_LogMessage value)  logMessage,required TResult Function( DaemonEvent_CredentialsGenerated value)  credentialsGenerated,required TResult Function( DaemonEvent_QrPayloadGenerated value)  qrPayloadGenerated,required TResult Function( DaemonEvent_SettingReported value)  settingReported,required TResult Function( DaemonEvent_SessionCodeGenerated value)  sessionCodeGenerated,required TResult Function( DaemonEvent_SignalingStarted value)  signalingStarted,required TResult Function( DaemonEvent_CodeGenerated value)  codeGenerated,required TResult Function( DaemonEvent_PeerDisconnected value)  peerDisconnected,required TResult Function( DaemonEvent_PeerConnected value)  peerConnected,required TResult Function( DaemonEvent_IncomingChat value)  incomingChat,}){
 final _that = this;
 switch (_that) {
 case DaemonEvent_PeerDiscovered():
@@ -1733,7 +1734,8 @@ return sessionCodeGenerated(_that);case DaemonEvent_SignalingStarted():
 return signalingStarted(_that);case DaemonEvent_CodeGenerated():
 return codeGenerated(_that);case DaemonEvent_PeerDisconnected():
 return peerDisconnected(_that);case DaemonEvent_PeerConnected():
-return peerConnected(_that);}
+return peerConnected(_that);case DaemonEvent_IncomingChat():
+return incomingChat(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -1747,7 +1749,7 @@ return peerConnected(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( DaemonEvent_PeerDiscovered value)?  peerDiscovered,TResult? Function( DaemonEvent_PeerLost value)?  peerLost,TResult? Function( DaemonEvent_TransferProgress value)?  transferProgress,TResult? Function( DaemonEvent_TransferComplete value)?  transferComplete,TResult? Function( DaemonEvent_PairingRequest value)?  pairingRequest,TResult? Function( DaemonEvent_TransferOffer value)?  transferOffer,TResult? Function( DaemonEvent_LogMessage value)?  logMessage,TResult? Function( DaemonEvent_CredentialsGenerated value)?  credentialsGenerated,TResult? Function( DaemonEvent_QrPayloadGenerated value)?  qrPayloadGenerated,TResult? Function( DaemonEvent_SettingReported value)?  settingReported,TResult? Function( DaemonEvent_SessionCodeGenerated value)?  sessionCodeGenerated,TResult? Function( DaemonEvent_SignalingStarted value)?  signalingStarted,TResult? Function( DaemonEvent_CodeGenerated value)?  codeGenerated,TResult? Function( DaemonEvent_PeerDisconnected value)?  peerDisconnected,TResult? Function( DaemonEvent_PeerConnected value)?  peerConnected,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( DaemonEvent_PeerDiscovered value)?  peerDiscovered,TResult? Function( DaemonEvent_PeerLost value)?  peerLost,TResult? Function( DaemonEvent_TransferProgress value)?  transferProgress,TResult? Function( DaemonEvent_TransferComplete value)?  transferComplete,TResult? Function( DaemonEvent_PairingRequest value)?  pairingRequest,TResult? Function( DaemonEvent_TransferOffer value)?  transferOffer,TResult? Function( DaemonEvent_LogMessage value)?  logMessage,TResult? Function( DaemonEvent_CredentialsGenerated value)?  credentialsGenerated,TResult? Function( DaemonEvent_QrPayloadGenerated value)?  qrPayloadGenerated,TResult? Function( DaemonEvent_SettingReported value)?  settingReported,TResult? Function( DaemonEvent_SessionCodeGenerated value)?  sessionCodeGenerated,TResult? Function( DaemonEvent_SignalingStarted value)?  signalingStarted,TResult? Function( DaemonEvent_CodeGenerated value)?  codeGenerated,TResult? Function( DaemonEvent_PeerDisconnected value)?  peerDisconnected,TResult? Function( DaemonEvent_PeerConnected value)?  peerConnected,TResult? Function( DaemonEvent_IncomingChat value)?  incomingChat,}){
 final _that = this;
 switch (_that) {
 case DaemonEvent_PeerDiscovered() when peerDiscovered != null:
@@ -1765,7 +1767,8 @@ return sessionCodeGenerated(_that);case DaemonEvent_SignalingStarted() when sign
 return signalingStarted(_that);case DaemonEvent_CodeGenerated() when codeGenerated != null:
 return codeGenerated(_that);case DaemonEvent_PeerDisconnected() when peerDisconnected != null:
 return peerDisconnected(_that);case DaemonEvent_PeerConnected() when peerConnected != null:
-return peerConnected(_that);case _:
+return peerConnected(_that);case DaemonEvent_IncomingChat() when incomingChat != null:
+return incomingChat(_that);case _:
   return null;
 
 }
@@ -1782,7 +1785,7 @@ return peerConnected(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String peerId,  String name,  String ip,  int port)?  peerDiscovered,TResult Function( String peerId)?  peerLost,TResult Function( String transferId,  BigInt bytesTransferred,  BigInt totalBytes,  double speed)?  transferProgress,TResult Function( String transferId,  String status)?  transferComplete,TResult Function( String peerId,  String pin)?  pairingRequest,TResult Function( String peerId,  String transferId,  String fileName,  BigInt fileSize,  String? thumbnail)?  transferOffer,TResult Function( String level,  String message)?  logMessage,TResult Function( String pin,  String sessionKey)?  credentialsGenerated,TResult Function( String payloadJson)?  qrPayloadGenerated,TResult Function( String key,  String value)?  settingReported,TResult Function( String code)?  sessionCodeGenerated,TResult Function( String id)?  signalingStarted,TResult Function( String key,  String? pin,  String ip)?  codeGenerated,TResult Function( String peerId)?  peerDisconnected,TResult Function( String peerId,  String name,  String address,  int port)?  peerConnected,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String peerId,  String name,  String ip,  int port)?  peerDiscovered,TResult Function( String peerId)?  peerLost,TResult Function( String transferId,  BigInt bytesTransferred,  BigInt totalBytes,  double speed)?  transferProgress,TResult Function( String transferId,  String status)?  transferComplete,TResult Function( String peerId,  String pin)?  pairingRequest,TResult Function( String peerId,  String transferId,  String fileName,  BigInt fileSize,  String? thumbnail)?  transferOffer,TResult Function( String level,  String message)?  logMessage,TResult Function( String pin,  String sessionKey)?  credentialsGenerated,TResult Function( String payloadJson)?  qrPayloadGenerated,TResult Function( String key,  String value)?  settingReported,TResult Function( String code)?  sessionCodeGenerated,TResult Function( String id)?  signalingStarted,TResult Function( String key,  String? pin,  String ip)?  codeGenerated,TResult Function( String peerId)?  peerDisconnected,TResult Function( String peerId,  String name,  String address,  int port)?  peerConnected,TResult Function( String peerId,  String text)?  incomingChat,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case DaemonEvent_PeerDiscovered() when peerDiscovered != null:
 return peerDiscovered(_that.peerId,_that.name,_that.ip,_that.port);case DaemonEvent_PeerLost() when peerLost != null:
@@ -1799,7 +1802,8 @@ return sessionCodeGenerated(_that.code);case DaemonEvent_SignalingStarted() when
 return signalingStarted(_that.id);case DaemonEvent_CodeGenerated() when codeGenerated != null:
 return codeGenerated(_that.key,_that.pin,_that.ip);case DaemonEvent_PeerDisconnected() when peerDisconnected != null:
 return peerDisconnected(_that.peerId);case DaemonEvent_PeerConnected() when peerConnected != null:
-return peerConnected(_that.peerId,_that.name,_that.address,_that.port);case _:
+return peerConnected(_that.peerId,_that.name,_that.address,_that.port);case DaemonEvent_IncomingChat() when incomingChat != null:
+return incomingChat(_that.peerId,_that.text);case _:
   return orElse();
 
 }
@@ -1817,7 +1821,7 @@ return peerConnected(_that.peerId,_that.name,_that.address,_that.port);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String peerId,  String name,  String ip,  int port)  peerDiscovered,required TResult Function( String peerId)  peerLost,required TResult Function( String transferId,  BigInt bytesTransferred,  BigInt totalBytes,  double speed)  transferProgress,required TResult Function( String transferId,  String status)  transferComplete,required TResult Function( String peerId,  String pin)  pairingRequest,required TResult Function( String peerId,  String transferId,  String fileName,  BigInt fileSize,  String? thumbnail)  transferOffer,required TResult Function( String level,  String message)  logMessage,required TResult Function( String pin,  String sessionKey)  credentialsGenerated,required TResult Function( String payloadJson)  qrPayloadGenerated,required TResult Function( String key,  String value)  settingReported,required TResult Function( String code)  sessionCodeGenerated,required TResult Function( String id)  signalingStarted,required TResult Function( String key,  String? pin,  String ip)  codeGenerated,required TResult Function( String peerId)  peerDisconnected,required TResult Function( String peerId,  String name,  String address,  int port)  peerConnected,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String peerId,  String name,  String ip,  int port)  peerDiscovered,required TResult Function( String peerId)  peerLost,required TResult Function( String transferId,  BigInt bytesTransferred,  BigInt totalBytes,  double speed)  transferProgress,required TResult Function( String transferId,  String status)  transferComplete,required TResult Function( String peerId,  String pin)  pairingRequest,required TResult Function( String peerId,  String transferId,  String fileName,  BigInt fileSize,  String? thumbnail)  transferOffer,required TResult Function( String level,  String message)  logMessage,required TResult Function( String pin,  String sessionKey)  credentialsGenerated,required TResult Function( String payloadJson)  qrPayloadGenerated,required TResult Function( String key,  String value)  settingReported,required TResult Function( String code)  sessionCodeGenerated,required TResult Function( String id)  signalingStarted,required TResult Function( String key,  String? pin,  String ip)  codeGenerated,required TResult Function( String peerId)  peerDisconnected,required TResult Function( String peerId,  String name,  String address,  int port)  peerConnected,required TResult Function( String peerId,  String text)  incomingChat,}) {final _that = this;
 switch (_that) {
 case DaemonEvent_PeerDiscovered():
 return peerDiscovered(_that.peerId,_that.name,_that.ip,_that.port);case DaemonEvent_PeerLost():
@@ -1834,7 +1838,8 @@ return sessionCodeGenerated(_that.code);case DaemonEvent_SignalingStarted():
 return signalingStarted(_that.id);case DaemonEvent_CodeGenerated():
 return codeGenerated(_that.key,_that.pin,_that.ip);case DaemonEvent_PeerDisconnected():
 return peerDisconnected(_that.peerId);case DaemonEvent_PeerConnected():
-return peerConnected(_that.peerId,_that.name,_that.address,_that.port);}
+return peerConnected(_that.peerId,_that.name,_that.address,_that.port);case DaemonEvent_IncomingChat():
+return incomingChat(_that.peerId,_that.text);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -1848,7 +1853,7 @@ return peerConnected(_that.peerId,_that.name,_that.address,_that.port);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String peerId,  String name,  String ip,  int port)?  peerDiscovered,TResult? Function( String peerId)?  peerLost,TResult? Function( String transferId,  BigInt bytesTransferred,  BigInt totalBytes,  double speed)?  transferProgress,TResult? Function( String transferId,  String status)?  transferComplete,TResult? Function( String peerId,  String pin)?  pairingRequest,TResult? Function( String peerId,  String transferId,  String fileName,  BigInt fileSize,  String? thumbnail)?  transferOffer,TResult? Function( String level,  String message)?  logMessage,TResult? Function( String pin,  String sessionKey)?  credentialsGenerated,TResult? Function( String payloadJson)?  qrPayloadGenerated,TResult? Function( String key,  String value)?  settingReported,TResult? Function( String code)?  sessionCodeGenerated,TResult? Function( String id)?  signalingStarted,TResult? Function( String key,  String? pin,  String ip)?  codeGenerated,TResult? Function( String peerId)?  peerDisconnected,TResult? Function( String peerId,  String name,  String address,  int port)?  peerConnected,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String peerId,  String name,  String ip,  int port)?  peerDiscovered,TResult? Function( String peerId)?  peerLost,TResult? Function( String transferId,  BigInt bytesTransferred,  BigInt totalBytes,  double speed)?  transferProgress,TResult? Function( String transferId,  String status)?  transferComplete,TResult? Function( String peerId,  String pin)?  pairingRequest,TResult? Function( String peerId,  String transferId,  String fileName,  BigInt fileSize,  String? thumbnail)?  transferOffer,TResult? Function( String level,  String message)?  logMessage,TResult? Function( String pin,  String sessionKey)?  credentialsGenerated,TResult? Function( String payloadJson)?  qrPayloadGenerated,TResult? Function( String key,  String value)?  settingReported,TResult? Function( String code)?  sessionCodeGenerated,TResult? Function( String id)?  signalingStarted,TResult? Function( String key,  String? pin,  String ip)?  codeGenerated,TResult? Function( String peerId)?  peerDisconnected,TResult? Function( String peerId,  String name,  String address,  int port)?  peerConnected,TResult? Function( String peerId,  String text)?  incomingChat,}) {final _that = this;
 switch (_that) {
 case DaemonEvent_PeerDiscovered() when peerDiscovered != null:
 return peerDiscovered(_that.peerId,_that.name,_that.ip,_that.port);case DaemonEvent_PeerLost() when peerLost != null:
@@ -1865,7 +1870,8 @@ return sessionCodeGenerated(_that.code);case DaemonEvent_SignalingStarted() when
 return signalingStarted(_that.id);case DaemonEvent_CodeGenerated() when codeGenerated != null:
 return codeGenerated(_that.key,_that.pin,_that.ip);case DaemonEvent_PeerDisconnected() when peerDisconnected != null:
 return peerDisconnected(_that.peerId);case DaemonEvent_PeerConnected() when peerConnected != null:
-return peerConnected(_that.peerId,_that.name,_that.address,_that.port);case _:
+return peerConnected(_that.peerId,_that.name,_that.address,_that.port);case DaemonEvent_IncomingChat() when incomingChat != null:
+return incomingChat(_that.peerId,_that.text);case _:
   return null;
 
 }
@@ -2897,6 +2903,74 @@ as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non
 as String,address: null == address ? _self.address : address // ignore: cast_nullable_to_non_nullable
 as String,port: null == port ? _self.port : port // ignore: cast_nullable_to_non_nullable
 as int,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class DaemonEvent_IncomingChat extends DaemonEvent {
+  const DaemonEvent_IncomingChat({required this.peerId, required this.text}): super._();
+
+
+ final  String peerId;
+ final  String text;
+
+/// Create a copy of DaemonEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$DaemonEvent_IncomingChatCopyWith<DaemonEvent_IncomingChat> get copyWith => _$DaemonEvent_IncomingChatCopyWithImpl<DaemonEvent_IncomingChat>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is DaemonEvent_IncomingChat&&(identical(other.peerId, peerId) || other.peerId == peerId)&&(identical(other.text, text) || other.text == text));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,peerId,text);
+
+@override
+String toString() {
+  return 'DaemonEvent.incomingChat(peerId: $peerId, text: $text)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $DaemonEvent_IncomingChatCopyWith<$Res> implements $DaemonEventCopyWith<$Res> {
+  factory $DaemonEvent_IncomingChatCopyWith(DaemonEvent_IncomingChat value, $Res Function(DaemonEvent_IncomingChat) _then) = _$DaemonEvent_IncomingChatCopyWithImpl;
+@useResult
+$Res call({
+ String peerId, String text
+});
+
+
+
+
+}
+/// @nodoc
+class _$DaemonEvent_IncomingChatCopyWithImpl<$Res>
+    implements $DaemonEvent_IncomingChatCopyWith<$Res> {
+  _$DaemonEvent_IncomingChatCopyWithImpl(this._self, this._then);
+
+  final DaemonEvent_IncomingChat _self;
+  final $Res Function(DaemonEvent_IncomingChat) _then;
+
+/// Create a copy of DaemonEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? peerId = null,Object? text = null,}) {
+  return _then(DaemonEvent_IncomingChat(
+peerId: null == peerId ? _self.peerId : peerId // ignore: cast_nullable_to_non_nullable
+as String,text: null == text ? _self.text : text // ignore: cast_nullable_to_non_nullable
+as String,
   ));
 }
 

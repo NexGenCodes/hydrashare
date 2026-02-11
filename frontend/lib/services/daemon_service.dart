@@ -191,16 +191,9 @@ class DaemonService {
           } else if (type == 'RECEIVE_STARTED') {
             debugPrint('📥 Incoming transfer started from: ${response['ip']}');
           } else if (type == 'INCOMING_CHAT') {
-            final peerIp = response['ip'] ?? 'Broadcast';
-            StorageService().saveMessage(
-              peerIp: peerIp,
-              text: response['text'] ?? '',
-              isMe: false,
-            );
+            // Already saved by Rust backend in new version
             _chatController.add(response);
-            if (response['unread'] == true) {
-              _incrementUnread(response['ip']);
-            }
+            _incrementUnread(response['ip']);
           } else if (type == 'FILE_OFFER') {
             final peerIp = response['ip'] ?? 'Broadcast';
             StorageService().saveMessage(
@@ -317,6 +310,12 @@ class DaemonService {
         'name': name,
         'ip': address,
         'port': port,
+      },
+      incomingChat: (peerId, text) => {
+        'type': 'INCOMING_CHAT',
+        'ip': peerId, // ip field used for peer identification in legacy UI
+        'text': text,
+        'unread': true,
       },
     );
   }

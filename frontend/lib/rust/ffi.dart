@@ -137,4 +137,8 @@ sealed class DaemonEvent with _$DaemonEvent {
     required String address,
     required int port,
   }) = DaemonEvent_PeerConnected;
+  const factory DaemonEvent.incomingChat({
+    required String peerId,
+    required String text,
+  }) = DaemonEvent_IncomingChat;
 }

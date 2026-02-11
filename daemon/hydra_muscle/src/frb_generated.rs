@@ -1267,6 +1267,14 @@ impl SseDecode for crate::ffi::DaemonEvent {
                     port: var_port,
                 };
             }
+            15 => {
+                let mut var_peerId = <String>::sse_decode(deserializer);
+                let mut var_text = <String>::sse_decode(deserializer);
+                return crate::ffi::DaemonEvent::IncomingChat {
+                    peer_id: var_peerId,
+                    text: var_text,
+                };
+            }
             _ => {
                 unimplemented!("");
             }
@@ -1615,6 +1623,12 @@ impl flutter_rust_bridge::IntoDart for crate::ffi::DaemonEvent {
                 port.into_into_dart().into_dart(),
             ]
             .into_dart(),
+            crate::ffi::DaemonEvent::IncomingChat { peer_id, text } => [
+                15.into_dart(),
+                peer_id.into_into_dart().into_dart(),
+                text.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
             _ => {
                 unimplemented!("");
             }
@@ -1877,6 +1891,11 @@ impl SseEncode for crate::ffi::DaemonEvent {
                 <String>::sse_encode(name, serializer);
                 <String>::sse_encode(address, serializer);
                 <u16>::sse_encode(port, serializer);
+            }
+            crate::ffi::DaemonEvent::IncomingChat { peer_id, text } => {
+                <i32>::sse_encode(15, serializer);
+                <String>::sse_encode(peer_id, serializer);
+                <String>::sse_encode(text, serializer);
             }
             _ => {
                 unimplemented!("");

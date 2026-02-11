@@ -1144,6 +1144,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           address: dco_decode_String(raw[3]),
           port: dco_decode_u_16(raw[4]),
         );
+      case 15:
+        return DaemonEvent_IncomingChat(
+          peerId: dco_decode_String(raw[1]),
+          text: dco_decode_String(raw[2]),
+        );
       default:
         throw Exception("unreachable");
     }
@@ -1430,6 +1435,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           address: var_address,
           port: var_port,
         );
+      case 15:
+        var var_peerId = sse_decode_String(deserializer);
+        var var_text = sse_decode_String(deserializer);
+        return DaemonEvent_IncomingChat(peerId: var_peerId, text: var_text);
       default:
         throw UnimplementedError('');
     }
@@ -1732,6 +1741,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(name, serializer);
         sse_encode_String(address, serializer);
         sse_encode_u_16(port, serializer);
+      case DaemonEvent_IncomingChat(peerId: final peerId, text: final text):
+        sse_encode_i_32(15, serializer);
+        sse_encode_String(peerId, serializer);
+        sse_encode_String(text, serializer);
     }
   }
 

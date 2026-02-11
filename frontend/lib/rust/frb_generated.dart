@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1367603488;
+  int get rustContentHash => 797422077;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -132,6 +132,11 @@ abstract class RustLibApi extends BaseApi {
   Future<int> crateApiSendFile({
     required String peerId,
     required String filePath,
+  });
+
+  Future<int> crateApiSendMessage({
+    required String peerId,
+    required String text,
   });
 
   Future<int> crateApiSetDeviceName({required String name});
@@ -754,6 +759,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
+  Future<int> crateApiSendMessage({
+    required String peerId,
+    required String text,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(peerId, serializer);
+          sse_encode_String(text, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 21,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_i_32,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSendMessageConstMeta,
+        argValues: [peerId, text],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSendMessageConstMeta => const TaskConstMeta(
+    debugName: "send_message",
+    argNames: ["peerId", "text"],
+  );
+
+  @override
   Future<int> crateApiSetDeviceName({required String name}) {
     return handler.executeNormal(
       NormalTask(
@@ -763,7 +802,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 22,
             port: port_,
           );
         },
@@ -792,7 +831,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 23,
             port: port_,
           );
         },
@@ -819,7 +858,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 24,
             port: port_,
           );
         },
@@ -846,7 +885,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 25,
             port: port_,
           );
         },
@@ -873,7 +912,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 26,
             port: port_,
           );
         },
@@ -900,7 +939,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 27,
             port: port_,
           );
         },
@@ -1014,8 +1053,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           encryptionKey: dco_decode_opt_String(raw[4]),
         );
       case 21:
-        return DaemonCommand_StopDiscovery();
+        return DaemonCommand_SendMessage(
+          peerId: dco_decode_String(raw[1]),
+          text: dco_decode_String(raw[2]),
+        );
       case 22:
+        return DaemonCommand_StopDiscovery();
+      case 23:
         return DaemonCommand_DisconnectPeer(peerId: dco_decode_String(raw[1]));
       default:
         throw Exception("unreachable");
@@ -1271,8 +1315,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           encryptionKey: var_encryptionKey,
         );
       case 21:
-        return DaemonCommand_StopDiscovery();
+        var var_peerId = sse_decode_String(deserializer);
+        var var_text = sse_decode_String(deserializer);
+        return DaemonCommand_SendMessage(peerId: var_peerId, text: var_text);
       case 22:
+        return DaemonCommand_StopDiscovery();
+      case 23:
         var var_peerId = sse_decode_String(deserializer);
         return DaemonCommand_DisconnectPeer(peerId: var_peerId);
       default:
@@ -1572,10 +1620,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(address, serializer);
         sse_encode_u_16(port, serializer);
         sse_encode_opt_String(encryptionKey, serializer);
-      case DaemonCommand_StopDiscovery():
+      case DaemonCommand_SendMessage(peerId: final peerId, text: final text):
         sse_encode_i_32(21, serializer);
-      case DaemonCommand_DisconnectPeer(peerId: final peerId):
+        sse_encode_String(peerId, serializer);
+        sse_encode_String(text, serializer);
+      case DaemonCommand_StopDiscovery():
         sse_encode_i_32(22, serializer);
+      case DaemonCommand_DisconnectPeer(peerId: final peerId):
+        sse_encode_i_32(23, serializer);
         sse_encode_String(peerId, serializer);
     }
   }

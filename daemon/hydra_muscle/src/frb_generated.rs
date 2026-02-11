@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1367603488;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 797422077;
 
 // Section: executor
 
@@ -730,6 +730,41 @@ fn wire__crate__api__send_file_impl(
         },
     )
 }
+fn wire__crate__api__send_message_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "send_message",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_peer_id = <String>::sse_decode(&mut deserializer);
+            let api_text = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::api::send_message(api_peer_id, api_text))?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__set_device_name_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1078,9 +1113,17 @@ impl SseDecode for crate::ffi::DaemonCommand {
                 };
             }
             21 => {
-                return crate::ffi::DaemonCommand::StopDiscovery;
+                let mut var_peerId = <String>::sse_decode(deserializer);
+                let mut var_text = <String>::sse_decode(deserializer);
+                return crate::ffi::DaemonCommand::SendMessage {
+                    peer_id: var_peerId,
+                    text: var_text,
+                };
             }
             22 => {
+                return crate::ffi::DaemonCommand::StopDiscovery;
+            }
+            23 => {
                 let mut var_peerId = <String>::sse_decode(deserializer);
                 return crate::ffi::DaemonCommand::DisconnectPeer {
                     peer_id: var_peerId,
@@ -1330,12 +1373,13 @@ fn pde_ffi_dispatcher_primary_impl(
         18 => wire__crate__api__reject_file_impl(port, ptr, rust_vec_len, data_len),
         19 => wire__crate__api__save_message_impl(port, ptr, rust_vec_len, data_len),
         20 => wire__crate__api__send_file_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__set_device_name_impl(port, ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__set_settings_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__start_discovery_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__start_engine_impl(port, ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__stop_discovery_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__stop_engine_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__send_message_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__set_device_name_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__set_settings_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__start_discovery_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__start_engine_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__stop_discovery_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__stop_engine_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1436,9 +1480,15 @@ impl flutter_rust_bridge::IntoDart for crate::ffi::DaemonCommand {
                 encryption_key.into_into_dart().into_dart(),
             ]
             .into_dart(),
-            crate::ffi::DaemonCommand::StopDiscovery => [21.into_dart()].into_dart(),
+            crate::ffi::DaemonCommand::SendMessage { peer_id, text } => [
+                21.into_dart(),
+                peer_id.into_into_dart().into_dart(),
+                text.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::ffi::DaemonCommand::StopDiscovery => [22.into_dart()].into_dart(),
             crate::ffi::DaemonCommand::DisconnectPeer { peer_id } => {
-                [22.into_dart(), peer_id.into_into_dart().into_dart()].into_dart()
+                [23.into_dart(), peer_id.into_into_dart().into_dart()].into_dart()
             }
             _ => {
                 unimplemented!("");
@@ -1701,11 +1751,16 @@ impl SseEncode for crate::ffi::DaemonCommand {
                 <u16>::sse_encode(port, serializer);
                 <Option<String>>::sse_encode(encryption_key, serializer);
             }
-            crate::ffi::DaemonCommand::StopDiscovery => {
+            crate::ffi::DaemonCommand::SendMessage { peer_id, text } => {
                 <i32>::sse_encode(21, serializer);
+                <String>::sse_encode(peer_id, serializer);
+                <String>::sse_encode(text, serializer);
+            }
+            crate::ffi::DaemonCommand::StopDiscovery => {
+                <i32>::sse_encode(22, serializer);
             }
             crate::ffi::DaemonCommand::DisconnectPeer { peer_id } => {
-                <i32>::sse_encode(22, serializer);
+                <i32>::sse_encode(23, serializer);
                 <String>::sse_encode(peer_id, serializer);
             }
             _ => {

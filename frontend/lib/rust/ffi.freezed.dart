@@ -55,7 +55,7 @@ extension DaemonCommandPatterns on DaemonCommand {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( DaemonCommand_Init value)?  init,TResult Function( DaemonCommand_StartEngine value)?  startEngine,TResult Function( DaemonCommand_StopEngine value)?  stopEngine,TResult Function( DaemonCommand_SaveMessage value)?  saveMessage,TResult Function( DaemonCommand_GetMessages value)?  getMessages,TResult Function( DaemonCommand_SendFile value)?  sendFile,TResult Function( DaemonCommand_AcceptFile value)?  acceptFile,TResult Function( DaemonCommand_CancelTransfer value)?  cancelTransfer,TResult Function( DaemonCommand_MarkMessagesRead value)?  markMessagesRead,TResult Function( DaemonCommand_RejectFile value)?  rejectFile,TResult Function( DaemonCommand_GenerateCredentials value)?  generateCredentials,TResult Function( DaemonCommand_GenerateQrPayload value)?  generateQrPayload,TResult Function( DaemonCommand_JoinSession value)?  joinSession,TResult Function( DaemonCommand_SetSettings value)?  setSettings,TResult Function( DaemonCommand_GetSettings value)?  getSettings,TResult Function( DaemonCommand_GenerateSessionCode value)?  generateSessionCode,TResult Function( DaemonCommand_JoinSessionCode value)?  joinSessionCode,TResult Function( DaemonCommand_SetDeviceName value)?  setDeviceName,TResult Function( DaemonCommand_StartDiscovery value)?  startDiscovery,TResult Function( DaemonCommand_GenerateCode value)?  generateCode,TResult Function( DaemonCommand_ConnectPeer value)?  connectPeer,TResult Function( DaemonCommand_StopDiscovery value)?  stopDiscovery,TResult Function( DaemonCommand_DisconnectPeer value)?  disconnectPeer,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( DaemonCommand_Init value)?  init,TResult Function( DaemonCommand_StartEngine value)?  startEngine,TResult Function( DaemonCommand_StopEngine value)?  stopEngine,TResult Function( DaemonCommand_SaveMessage value)?  saveMessage,TResult Function( DaemonCommand_GetMessages value)?  getMessages,TResult Function( DaemonCommand_SendFile value)?  sendFile,TResult Function( DaemonCommand_AcceptFile value)?  acceptFile,TResult Function( DaemonCommand_CancelTransfer value)?  cancelTransfer,TResult Function( DaemonCommand_MarkMessagesRead value)?  markMessagesRead,TResult Function( DaemonCommand_RejectFile value)?  rejectFile,TResult Function( DaemonCommand_GenerateCredentials value)?  generateCredentials,TResult Function( DaemonCommand_GenerateQrPayload value)?  generateQrPayload,TResult Function( DaemonCommand_JoinSession value)?  joinSession,TResult Function( DaemonCommand_SetSettings value)?  setSettings,TResult Function( DaemonCommand_GetSettings value)?  getSettings,TResult Function( DaemonCommand_GenerateSessionCode value)?  generateSessionCode,TResult Function( DaemonCommand_JoinSessionCode value)?  joinSessionCode,TResult Function( DaemonCommand_SetDeviceName value)?  setDeviceName,TResult Function( DaemonCommand_StartDiscovery value)?  startDiscovery,TResult Function( DaemonCommand_GenerateCode value)?  generateCode,TResult Function( DaemonCommand_ConnectPeer value)?  connectPeer,TResult Function( DaemonCommand_SendMessage value)?  sendMessage,TResult Function( DaemonCommand_StopDiscovery value)?  stopDiscovery,TResult Function( DaemonCommand_DisconnectPeer value)?  disconnectPeer,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case DaemonCommand_Init() when init != null:
@@ -79,7 +79,8 @@ return joinSessionCode(_that);case DaemonCommand_SetDeviceName() when setDeviceN
 return setDeviceName(_that);case DaemonCommand_StartDiscovery() when startDiscovery != null:
 return startDiscovery(_that);case DaemonCommand_GenerateCode() when generateCode != null:
 return generateCode(_that);case DaemonCommand_ConnectPeer() when connectPeer != null:
-return connectPeer(_that);case DaemonCommand_StopDiscovery() when stopDiscovery != null:
+return connectPeer(_that);case DaemonCommand_SendMessage() when sendMessage != null:
+return sendMessage(_that);case DaemonCommand_StopDiscovery() when stopDiscovery != null:
 return stopDiscovery(_that);case DaemonCommand_DisconnectPeer() when disconnectPeer != null:
 return disconnectPeer(_that);case _:
   return orElse();
@@ -99,7 +100,7 @@ return disconnectPeer(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( DaemonCommand_Init value)  init,required TResult Function( DaemonCommand_StartEngine value)  startEngine,required TResult Function( DaemonCommand_StopEngine value)  stopEngine,required TResult Function( DaemonCommand_SaveMessage value)  saveMessage,required TResult Function( DaemonCommand_GetMessages value)  getMessages,required TResult Function( DaemonCommand_SendFile value)  sendFile,required TResult Function( DaemonCommand_AcceptFile value)  acceptFile,required TResult Function( DaemonCommand_CancelTransfer value)  cancelTransfer,required TResult Function( DaemonCommand_MarkMessagesRead value)  markMessagesRead,required TResult Function( DaemonCommand_RejectFile value)  rejectFile,required TResult Function( DaemonCommand_GenerateCredentials value)  generateCredentials,required TResult Function( DaemonCommand_GenerateQrPayload value)  generateQrPayload,required TResult Function( DaemonCommand_JoinSession value)  joinSession,required TResult Function( DaemonCommand_SetSettings value)  setSettings,required TResult Function( DaemonCommand_GetSettings value)  getSettings,required TResult Function( DaemonCommand_GenerateSessionCode value)  generateSessionCode,required TResult Function( DaemonCommand_JoinSessionCode value)  joinSessionCode,required TResult Function( DaemonCommand_SetDeviceName value)  setDeviceName,required TResult Function( DaemonCommand_StartDiscovery value)  startDiscovery,required TResult Function( DaemonCommand_GenerateCode value)  generateCode,required TResult Function( DaemonCommand_ConnectPeer value)  connectPeer,required TResult Function( DaemonCommand_StopDiscovery value)  stopDiscovery,required TResult Function( DaemonCommand_DisconnectPeer value)  disconnectPeer,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( DaemonCommand_Init value)  init,required TResult Function( DaemonCommand_StartEngine value)  startEngine,required TResult Function( DaemonCommand_StopEngine value)  stopEngine,required TResult Function( DaemonCommand_SaveMessage value)  saveMessage,required TResult Function( DaemonCommand_GetMessages value)  getMessages,required TResult Function( DaemonCommand_SendFile value)  sendFile,required TResult Function( DaemonCommand_AcceptFile value)  acceptFile,required TResult Function( DaemonCommand_CancelTransfer value)  cancelTransfer,required TResult Function( DaemonCommand_MarkMessagesRead value)  markMessagesRead,required TResult Function( DaemonCommand_RejectFile value)  rejectFile,required TResult Function( DaemonCommand_GenerateCredentials value)  generateCredentials,required TResult Function( DaemonCommand_GenerateQrPayload value)  generateQrPayload,required TResult Function( DaemonCommand_JoinSession value)  joinSession,required TResult Function( DaemonCommand_SetSettings value)  setSettings,required TResult Function( DaemonCommand_GetSettings value)  getSettings,required TResult Function( DaemonCommand_GenerateSessionCode value)  generateSessionCode,required TResult Function( DaemonCommand_JoinSessionCode value)  joinSessionCode,required TResult Function( DaemonCommand_SetDeviceName value)  setDeviceName,required TResult Function( DaemonCommand_StartDiscovery value)  startDiscovery,required TResult Function( DaemonCommand_GenerateCode value)  generateCode,required TResult Function( DaemonCommand_ConnectPeer value)  connectPeer,required TResult Function( DaemonCommand_SendMessage value)  sendMessage,required TResult Function( DaemonCommand_StopDiscovery value)  stopDiscovery,required TResult Function( DaemonCommand_DisconnectPeer value)  disconnectPeer,}){
 final _that = this;
 switch (_that) {
 case DaemonCommand_Init():
@@ -123,7 +124,8 @@ return joinSessionCode(_that);case DaemonCommand_SetDeviceName():
 return setDeviceName(_that);case DaemonCommand_StartDiscovery():
 return startDiscovery(_that);case DaemonCommand_GenerateCode():
 return generateCode(_that);case DaemonCommand_ConnectPeer():
-return connectPeer(_that);case DaemonCommand_StopDiscovery():
+return connectPeer(_that);case DaemonCommand_SendMessage():
+return sendMessage(_that);case DaemonCommand_StopDiscovery():
 return stopDiscovery(_that);case DaemonCommand_DisconnectPeer():
 return disconnectPeer(_that);}
 }
@@ -139,7 +141,7 @@ return disconnectPeer(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( DaemonCommand_Init value)?  init,TResult? Function( DaemonCommand_StartEngine value)?  startEngine,TResult? Function( DaemonCommand_StopEngine value)?  stopEngine,TResult? Function( DaemonCommand_SaveMessage value)?  saveMessage,TResult? Function( DaemonCommand_GetMessages value)?  getMessages,TResult? Function( DaemonCommand_SendFile value)?  sendFile,TResult? Function( DaemonCommand_AcceptFile value)?  acceptFile,TResult? Function( DaemonCommand_CancelTransfer value)?  cancelTransfer,TResult? Function( DaemonCommand_MarkMessagesRead value)?  markMessagesRead,TResult? Function( DaemonCommand_RejectFile value)?  rejectFile,TResult? Function( DaemonCommand_GenerateCredentials value)?  generateCredentials,TResult? Function( DaemonCommand_GenerateQrPayload value)?  generateQrPayload,TResult? Function( DaemonCommand_JoinSession value)?  joinSession,TResult? Function( DaemonCommand_SetSettings value)?  setSettings,TResult? Function( DaemonCommand_GetSettings value)?  getSettings,TResult? Function( DaemonCommand_GenerateSessionCode value)?  generateSessionCode,TResult? Function( DaemonCommand_JoinSessionCode value)?  joinSessionCode,TResult? Function( DaemonCommand_SetDeviceName value)?  setDeviceName,TResult? Function( DaemonCommand_StartDiscovery value)?  startDiscovery,TResult? Function( DaemonCommand_GenerateCode value)?  generateCode,TResult? Function( DaemonCommand_ConnectPeer value)?  connectPeer,TResult? Function( DaemonCommand_StopDiscovery value)?  stopDiscovery,TResult? Function( DaemonCommand_DisconnectPeer value)?  disconnectPeer,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( DaemonCommand_Init value)?  init,TResult? Function( DaemonCommand_StartEngine value)?  startEngine,TResult? Function( DaemonCommand_StopEngine value)?  stopEngine,TResult? Function( DaemonCommand_SaveMessage value)?  saveMessage,TResult? Function( DaemonCommand_GetMessages value)?  getMessages,TResult? Function( DaemonCommand_SendFile value)?  sendFile,TResult? Function( DaemonCommand_AcceptFile value)?  acceptFile,TResult? Function( DaemonCommand_CancelTransfer value)?  cancelTransfer,TResult? Function( DaemonCommand_MarkMessagesRead value)?  markMessagesRead,TResult? Function( DaemonCommand_RejectFile value)?  rejectFile,TResult? Function( DaemonCommand_GenerateCredentials value)?  generateCredentials,TResult? Function( DaemonCommand_GenerateQrPayload value)?  generateQrPayload,TResult? Function( DaemonCommand_JoinSession value)?  joinSession,TResult? Function( DaemonCommand_SetSettings value)?  setSettings,TResult? Function( DaemonCommand_GetSettings value)?  getSettings,TResult? Function( DaemonCommand_GenerateSessionCode value)?  generateSessionCode,TResult? Function( DaemonCommand_JoinSessionCode value)?  joinSessionCode,TResult? Function( DaemonCommand_SetDeviceName value)?  setDeviceName,TResult? Function( DaemonCommand_StartDiscovery value)?  startDiscovery,TResult? Function( DaemonCommand_GenerateCode value)?  generateCode,TResult? Function( DaemonCommand_ConnectPeer value)?  connectPeer,TResult? Function( DaemonCommand_SendMessage value)?  sendMessage,TResult? Function( DaemonCommand_StopDiscovery value)?  stopDiscovery,TResult? Function( DaemonCommand_DisconnectPeer value)?  disconnectPeer,}){
 final _that = this;
 switch (_that) {
 case DaemonCommand_Init() when init != null:
@@ -163,7 +165,8 @@ return joinSessionCode(_that);case DaemonCommand_SetDeviceName() when setDeviceN
 return setDeviceName(_that);case DaemonCommand_StartDiscovery() when startDiscovery != null:
 return startDiscovery(_that);case DaemonCommand_GenerateCode() when generateCode != null:
 return generateCode(_that);case DaemonCommand_ConnectPeer() when connectPeer != null:
-return connectPeer(_that);case DaemonCommand_StopDiscovery() when stopDiscovery != null:
+return connectPeer(_that);case DaemonCommand_SendMessage() when sendMessage != null:
+return sendMessage(_that);case DaemonCommand_StopDiscovery() when stopDiscovery != null:
 return stopDiscovery(_that);case DaemonCommand_DisconnectPeer() when disconnectPeer != null:
 return disconnectPeer(_that);case _:
   return null;
@@ -182,7 +185,7 @@ return disconnectPeer(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String dataDir)?  init,TResult Function()?  startEngine,TResult Function()?  stopEngine,TResult Function( String message)?  saveMessage,TResult Function( String peerId)?  getMessages,TResult Function( String peerId,  String filePath)?  sendFile,TResult Function( String offerId,  String peerId,  BigInt fileSize,  String destPath)?  acceptFile,TResult Function( String transferId)?  cancelTransfer,TResult Function( String peerId)?  markMessagesRead,TResult Function( String offerId,  String peerId)?  rejectFile,TResult Function()?  generateCredentials,TResult Function()?  generateQrPayload,TResult Function( String pin)?  joinSession,TResult Function( String key,  String text)?  setSettings,TResult Function( String key)?  getSettings,TResult Function()?  generateSessionCode,TResult Function( String text)?  joinSessionCode,TResult Function( String name)?  setDeviceName,TResult Function()?  startDiscovery,TResult Function()?  generateCode,TResult Function( String peerId,  String address,  int port,  String? encryptionKey)?  connectPeer,TResult Function()?  stopDiscovery,TResult Function( String peerId)?  disconnectPeer,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String dataDir)?  init,TResult Function()?  startEngine,TResult Function()?  stopEngine,TResult Function( String message)?  saveMessage,TResult Function( String peerId)?  getMessages,TResult Function( String peerId,  String filePath)?  sendFile,TResult Function( String offerId,  String peerId,  BigInt fileSize,  String destPath)?  acceptFile,TResult Function( String transferId)?  cancelTransfer,TResult Function( String peerId)?  markMessagesRead,TResult Function( String offerId,  String peerId)?  rejectFile,TResult Function()?  generateCredentials,TResult Function()?  generateQrPayload,TResult Function( String pin)?  joinSession,TResult Function( String key,  String text)?  setSettings,TResult Function( String key)?  getSettings,TResult Function()?  generateSessionCode,TResult Function( String text)?  joinSessionCode,TResult Function( String name)?  setDeviceName,TResult Function()?  startDiscovery,TResult Function()?  generateCode,TResult Function( String peerId,  String address,  int port,  String? encryptionKey)?  connectPeer,TResult Function( String peerId,  String text)?  sendMessage,TResult Function()?  stopDiscovery,TResult Function( String peerId)?  disconnectPeer,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case DaemonCommand_Init() when init != null:
 return init(_that.dataDir);case DaemonCommand_StartEngine() when startEngine != null:
@@ -205,7 +208,8 @@ return joinSessionCode(_that.text);case DaemonCommand_SetDeviceName() when setDe
 return setDeviceName(_that.name);case DaemonCommand_StartDiscovery() when startDiscovery != null:
 return startDiscovery();case DaemonCommand_GenerateCode() when generateCode != null:
 return generateCode();case DaemonCommand_ConnectPeer() when connectPeer != null:
-return connectPeer(_that.peerId,_that.address,_that.port,_that.encryptionKey);case DaemonCommand_StopDiscovery() when stopDiscovery != null:
+return connectPeer(_that.peerId,_that.address,_that.port,_that.encryptionKey);case DaemonCommand_SendMessage() when sendMessage != null:
+return sendMessage(_that.peerId,_that.text);case DaemonCommand_StopDiscovery() when stopDiscovery != null:
 return stopDiscovery();case DaemonCommand_DisconnectPeer() when disconnectPeer != null:
 return disconnectPeer(_that.peerId);case _:
   return orElse();
@@ -225,7 +229,7 @@ return disconnectPeer(_that.peerId);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String dataDir)  init,required TResult Function()  startEngine,required TResult Function()  stopEngine,required TResult Function( String message)  saveMessage,required TResult Function( String peerId)  getMessages,required TResult Function( String peerId,  String filePath)  sendFile,required TResult Function( String offerId,  String peerId,  BigInt fileSize,  String destPath)  acceptFile,required TResult Function( String transferId)  cancelTransfer,required TResult Function( String peerId)  markMessagesRead,required TResult Function( String offerId,  String peerId)  rejectFile,required TResult Function()  generateCredentials,required TResult Function()  generateQrPayload,required TResult Function( String pin)  joinSession,required TResult Function( String key,  String text)  setSettings,required TResult Function( String key)  getSettings,required TResult Function()  generateSessionCode,required TResult Function( String text)  joinSessionCode,required TResult Function( String name)  setDeviceName,required TResult Function()  startDiscovery,required TResult Function()  generateCode,required TResult Function( String peerId,  String address,  int port,  String? encryptionKey)  connectPeer,required TResult Function()  stopDiscovery,required TResult Function( String peerId)  disconnectPeer,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String dataDir)  init,required TResult Function()  startEngine,required TResult Function()  stopEngine,required TResult Function( String message)  saveMessage,required TResult Function( String peerId)  getMessages,required TResult Function( String peerId,  String filePath)  sendFile,required TResult Function( String offerId,  String peerId,  BigInt fileSize,  String destPath)  acceptFile,required TResult Function( String transferId)  cancelTransfer,required TResult Function( String peerId)  markMessagesRead,required TResult Function( String offerId,  String peerId)  rejectFile,required TResult Function()  generateCredentials,required TResult Function()  generateQrPayload,required TResult Function( String pin)  joinSession,required TResult Function( String key,  String text)  setSettings,required TResult Function( String key)  getSettings,required TResult Function()  generateSessionCode,required TResult Function( String text)  joinSessionCode,required TResult Function( String name)  setDeviceName,required TResult Function()  startDiscovery,required TResult Function()  generateCode,required TResult Function( String peerId,  String address,  int port,  String? encryptionKey)  connectPeer,required TResult Function( String peerId,  String text)  sendMessage,required TResult Function()  stopDiscovery,required TResult Function( String peerId)  disconnectPeer,}) {final _that = this;
 switch (_that) {
 case DaemonCommand_Init():
 return init(_that.dataDir);case DaemonCommand_StartEngine():
@@ -248,7 +252,8 @@ return joinSessionCode(_that.text);case DaemonCommand_SetDeviceName():
 return setDeviceName(_that.name);case DaemonCommand_StartDiscovery():
 return startDiscovery();case DaemonCommand_GenerateCode():
 return generateCode();case DaemonCommand_ConnectPeer():
-return connectPeer(_that.peerId,_that.address,_that.port,_that.encryptionKey);case DaemonCommand_StopDiscovery():
+return connectPeer(_that.peerId,_that.address,_that.port,_that.encryptionKey);case DaemonCommand_SendMessage():
+return sendMessage(_that.peerId,_that.text);case DaemonCommand_StopDiscovery():
 return stopDiscovery();case DaemonCommand_DisconnectPeer():
 return disconnectPeer(_that.peerId);}
 }
@@ -264,7 +269,7 @@ return disconnectPeer(_that.peerId);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String dataDir)?  init,TResult? Function()?  startEngine,TResult? Function()?  stopEngine,TResult? Function( String message)?  saveMessage,TResult? Function( String peerId)?  getMessages,TResult? Function( String peerId,  String filePath)?  sendFile,TResult? Function( String offerId,  String peerId,  BigInt fileSize,  String destPath)?  acceptFile,TResult? Function( String transferId)?  cancelTransfer,TResult? Function( String peerId)?  markMessagesRead,TResult? Function( String offerId,  String peerId)?  rejectFile,TResult? Function()?  generateCredentials,TResult? Function()?  generateQrPayload,TResult? Function( String pin)?  joinSession,TResult? Function( String key,  String text)?  setSettings,TResult? Function( String key)?  getSettings,TResult? Function()?  generateSessionCode,TResult? Function( String text)?  joinSessionCode,TResult? Function( String name)?  setDeviceName,TResult? Function()?  startDiscovery,TResult? Function()?  generateCode,TResult? Function( String peerId,  String address,  int port,  String? encryptionKey)?  connectPeer,TResult? Function()?  stopDiscovery,TResult? Function( String peerId)?  disconnectPeer,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String dataDir)?  init,TResult? Function()?  startEngine,TResult? Function()?  stopEngine,TResult? Function( String message)?  saveMessage,TResult? Function( String peerId)?  getMessages,TResult? Function( String peerId,  String filePath)?  sendFile,TResult? Function( String offerId,  String peerId,  BigInt fileSize,  String destPath)?  acceptFile,TResult? Function( String transferId)?  cancelTransfer,TResult? Function( String peerId)?  markMessagesRead,TResult? Function( String offerId,  String peerId)?  rejectFile,TResult? Function()?  generateCredentials,TResult? Function()?  generateQrPayload,TResult? Function( String pin)?  joinSession,TResult? Function( String key,  String text)?  setSettings,TResult? Function( String key)?  getSettings,TResult? Function()?  generateSessionCode,TResult? Function( String text)?  joinSessionCode,TResult? Function( String name)?  setDeviceName,TResult? Function()?  startDiscovery,TResult? Function()?  generateCode,TResult? Function( String peerId,  String address,  int port,  String? encryptionKey)?  connectPeer,TResult? Function( String peerId,  String text)?  sendMessage,TResult? Function()?  stopDiscovery,TResult? Function( String peerId)?  disconnectPeer,}) {final _that = this;
 switch (_that) {
 case DaemonCommand_Init() when init != null:
 return init(_that.dataDir);case DaemonCommand_StartEngine() when startEngine != null:
@@ -287,7 +292,8 @@ return joinSessionCode(_that.text);case DaemonCommand_SetDeviceName() when setDe
 return setDeviceName(_that.name);case DaemonCommand_StartDiscovery() when startDiscovery != null:
 return startDiscovery();case DaemonCommand_GenerateCode() when generateCode != null:
 return generateCode();case DaemonCommand_ConnectPeer() when connectPeer != null:
-return connectPeer(_that.peerId,_that.address,_that.port,_that.encryptionKey);case DaemonCommand_StopDiscovery() when stopDiscovery != null:
+return connectPeer(_that.peerId,_that.address,_that.port,_that.encryptionKey);case DaemonCommand_SendMessage() when sendMessage != null:
+return sendMessage(_that.peerId,_that.text);case DaemonCommand_StopDiscovery() when stopDiscovery != null:
 return stopDiscovery();case DaemonCommand_DisconnectPeer() when disconnectPeer != null:
 return disconnectPeer(_that.peerId);case _:
   return null;
@@ -1457,6 +1463,74 @@ as String,address: null == address ? _self.address : address // ignore: cast_nul
 as String,port: null == port ? _self.port : port // ignore: cast_nullable_to_non_nullable
 as int,encryptionKey: freezed == encryptionKey ? _self.encryptionKey : encryptionKey // ignore: cast_nullable_to_non_nullable
 as String?,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class DaemonCommand_SendMessage extends DaemonCommand {
+  const DaemonCommand_SendMessage({required this.peerId, required this.text}): super._();
+
+
+ final  String peerId;
+ final  String text;
+
+/// Create a copy of DaemonCommand
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$DaemonCommand_SendMessageCopyWith<DaemonCommand_SendMessage> get copyWith => _$DaemonCommand_SendMessageCopyWithImpl<DaemonCommand_SendMessage>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is DaemonCommand_SendMessage&&(identical(other.peerId, peerId) || other.peerId == peerId)&&(identical(other.text, text) || other.text == text));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,peerId,text);
+
+@override
+String toString() {
+  return 'DaemonCommand.sendMessage(peerId: $peerId, text: $text)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $DaemonCommand_SendMessageCopyWith<$Res> implements $DaemonCommandCopyWith<$Res> {
+  factory $DaemonCommand_SendMessageCopyWith(DaemonCommand_SendMessage value, $Res Function(DaemonCommand_SendMessage) _then) = _$DaemonCommand_SendMessageCopyWithImpl;
+@useResult
+$Res call({
+ String peerId, String text
+});
+
+
+
+
+}
+/// @nodoc
+class _$DaemonCommand_SendMessageCopyWithImpl<$Res>
+    implements $DaemonCommand_SendMessageCopyWith<$Res> {
+  _$DaemonCommand_SendMessageCopyWithImpl(this._self, this._then);
+
+  final DaemonCommand_SendMessage _self;
+  final $Res Function(DaemonCommand_SendMessage) _then;
+
+/// Create a copy of DaemonCommand
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? peerId = null,Object? text = null,}) {
+  return _then(DaemonCommand_SendMessage(
+peerId: null == peerId ? _self.peerId : peerId // ignore: cast_nullable_to_non_nullable
+as String,text: null == text ? _self.text : text // ignore: cast_nullable_to_non_nullable
+as String,
   ));
 }
 

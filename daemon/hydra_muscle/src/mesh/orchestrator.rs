@@ -262,6 +262,16 @@ impl Orchestrator {
                             debug!("📩 Received handshake message type from stream");
                             if let MeshMessage::Handshake { ref peer_id, ref name } = msg {
                                 remote_peer_id = Some(peer_id.clone());
+
+                                // Send our handshake back so the initiator also registers us
+                                let reply = MeshMessage::Handshake {
+                                    name: hostname::get().map(|h| h.to_string_lossy().to_string()).unwrap_or_else(|_| "Unknown".to_string()),
+                                    peer_id: orchestrator.local_peer_id.clone(),
+                                };
+                                if let Ok(reply_buf) = serde_json::to_vec(&reply) {
+                                    let _ = _send.write_all(&reply_buf).await;
+                                }
+
                                 // Register connection in bonding pool
                                 if let Ok(mut conns) = orchestrator.connections.write() {
                                     let entry = conns.entry(peer_id.clone()).or_insert_with(Vec::new);
@@ -455,7 +465,7 @@ impl Orchestrator {
     }
 
     async fn start_mesh_session(&self, conn: quinn::Connection) {
-        let (mut send, mut _recv) = match conn.open_bi().await {
+        let (mut send, mut recv) = match conn.open_bi().await {
             Ok(pair) => pair,
             Err(_) => return,
         };
@@ -469,8 +479,32 @@ impl Orchestrator {
             let _ = send.write_all(&buf).await;
         }
         
-        // We can't Register connection here because we don't know the remote peer_id yet.
-        // It will be registered in the listener loop when we receive THEIR handshake.
+        // Listen for reciprocal handshake on the same stream
+        let orch = Arc::new(self.clone());
+        let c2 = conn.clone();
+        crate::system::runtime::RUNTIME.spawn(async move {
+            let mut buf = vec![0u8; 65536];
+            if let Ok(Some(len)) = recv.read(&mut buf).await {
+                if let Ok(reply) = serde_json::from_slice::<MeshMessage>(&buf[..len]) {
+                    if let MeshMessage::Handshake { ref peer_id, ref name } = reply {
+                        if let Ok(mut conns) = orch.connections.write() {
+                            let entry = conns.entry(peer_id.clone()).or_insert_with(Vec::new);
+                            if !entry.iter().any(|c| c.remote_address() == c2.remote_address()) {
+                                entry.push(c2.clone());
+                                info!("🔗 Reciprocal handshake from {}: {}", peer_id, c2.remote_address());
+
+                                crate::ffi::emit_event(crate::ffi::DaemonEvent::PeerConnected {
+                                    peer_id: peer_id.clone(),
+                                    name: name.clone(),
+                                    address: c2.remote_address().ip().to_string(),
+                                    port: c2.remote_address().port(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        });
         
         let orchestrator = Arc::new(self.clone());
         crate::system::runtime::RUNTIME.spawn(async move {

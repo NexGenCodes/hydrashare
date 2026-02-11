@@ -61,6 +61,9 @@ pub fn get_messages(peer_id: String) -> i32 {
     handle_command(DaemonCommand::GetMessages { peer_id })
 }
 
+pub fn send_message(peer_id: String, text: String) -> i32 {
+    handle_command(DaemonCommand::SendMessage { peer_id, text })
+}
 
 pub fn reject_file(offer_id: String, peer_id: String) -> i32 {
     handle_command(DaemonCommand::RejectFile { offer_id, peer_id })

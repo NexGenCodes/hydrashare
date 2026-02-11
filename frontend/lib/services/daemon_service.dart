@@ -649,8 +649,7 @@ class DaemonService {
 
   /// Send a private chat message to a peer
   Future<void> sendChat(String peerIp, String text) async {
-    await StorageService().saveMessage(peerIp: peerIp, text: text, isMe: true);
-    debugPrint('❌ SEND_CHAT not implemented in Rust backend yet.');
+    await rust_api.sendMessage(peerId: peerIp, text: text);
   }
 
   /// Alias for sendChat to maintain backward compatibility

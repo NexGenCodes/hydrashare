@@ -51,6 +51,9 @@ Future<int> saveMessage({required String message}) =>
 Future<int> getMessages({required String peerId}) =>
     RustLib.instance.api.crateApiGetMessages(peerId: peerId);
 
+Future<int> sendMessage({required String peerId, required String text}) =>
+    RustLib.instance.api.crateApiSendMessage(peerId: peerId, text: text);
+
 Future<int> rejectFile({required String offerId, required String peerId}) =>
     RustLib.instance.api.crateApiRejectFile(offerId: offerId, peerId: peerId);
 

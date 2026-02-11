@@ -64,6 +64,10 @@ sealed class DaemonCommand with _$DaemonCommand {
     required int port,
     String? encryptionKey,
   }) = DaemonCommand_ConnectPeer;
+  const factory DaemonCommand.sendMessage({
+    required String peerId,
+    required String text,
+  }) = DaemonCommand_SendMessage;
   const factory DaemonCommand.stopDiscovery() = DaemonCommand_StopDiscovery;
   const factory DaemonCommand.disconnectPeer({required String peerId}) =
       DaemonCommand_DisconnectPeer;
